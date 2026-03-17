@@ -19,7 +19,7 @@ When you're deriving equations — whether by hand, with Claude Code, or any AI 
 No API keys. No cloud. No cost. One 2.3MB binary. Everything runs locally.
 
 [![Rust](https://img.shields.io/badge/Rust-1.70+-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-237_passing-2ea44f)](#)
+[![Tests](https://img.shields.io/badge/tests-242_passing-2ea44f)](#)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Binary](https://img.shields.io/badge/binary-2.3MB-8B5CF6)](#)
 [![KaTeX](https://img.shields.io/badge/KaTeX-server--side-329DAA?logo=latex&logoColor=white)](#)
@@ -144,11 +144,19 @@ The document format is the interface. Any tool that produces `.cb.md` gets the f
 
 ## Quick Start
 
-```bash
-# Start a session (opens browser automatically)
-cliboard new "My Derivation"
+cliboard is a toolkit — pick the level of commitment you need:
 
-# Add content from another terminal
+```bash
+# One-shot: render a single equation or file
+cliboard render "E = mc^2"
+cliboard render derivation.cb.md
+echo '$$\int_0^\infty e^{-x^2} dx$$' | cliboard render -
+
+# Live document: watch a file, live-reload in browser (no sessions)
+cliboard serve notes.cb.md
+
+# Full interactive session with chat, selection, send-to-terminal
+cliboard new "My Derivation"
 cliboard step "Title" "\latex"
 cliboard note "Annotation text with $inline$ math"
 cliboard result "Final Answer" "\latex"
@@ -230,6 +238,17 @@ $$E_n = -\frac{13.6 \text{ eV}}{n^2}$$
 
 ## CLI Reference
 
+**Core (no session needed)**
+
+| Command | Description |
+|---------|-------------|
+| `cliboard render "\latex"` | Render a single equation and open in browser |
+| `cliboard render file.cb.md` | Render a `.cb.md` file as self-contained HTML |
+| `cliboard render -` | Render `.cb.md` content from stdin |
+| `cliboard serve file.cb.md` | Watch a file and live-render in browser (no session) |
+
+**Interactive (full session)**
+
 | Command | Description |
 |---------|-------------|
 | `cliboard new "Title"` | Start a session and open the board |
@@ -239,7 +258,6 @@ $$E_n = -\frac{13.6 \text{ eV}}{n^2}$$
 | `cliboard text "text"` | Add a prose paragraph |
 | `cliboard result "Title" "\latex"` | Add a highlighted result box |
 | `cliboard divider` | Add a section divider |
-| `cliboard render "\latex"` | Quick one-shot render (no session) |
 | `cliboard export file.html` | Export as self-contained HTML |
 | `cliboard chat` | Show pending chat questions |
 | `cliboard reply N "text"` | Reply to a question on step N |
@@ -248,7 +266,6 @@ $$E_n = -\frac{13.6 \text{ eV}}{n^2}$$
 | `cliboard status` | Show session status |
 | `cliboard stop` | Stop the server |
 | `cliboard update` | Update to the latest version |
-| `cliboard update --check` | Check for updates without installing |
 
 ## Selection and Send-to-Terminal
 

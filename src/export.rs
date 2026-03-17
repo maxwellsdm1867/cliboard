@@ -1,6 +1,6 @@
 use crate::document::{Block, Document};
 use crate::render;
-use crate::session::{ChatContext, ChatMessage, ChatRole, ChatStore};
+use crate::document::{ChatContext, ChatMessage, ChatRole, ChatStore};
 use rust_embed::Embed;
 use serde::{Deserialize, Serialize};
 use std::fs;

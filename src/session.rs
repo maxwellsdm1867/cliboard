@@ -4,47 +4,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::document::Selection;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatMessage {
-    pub id: String,
-    pub step_id: usize,
-    pub role: ChatRole,
-    pub text: String,
-    pub rendered: String,
-    pub timestamp: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<ChatContext>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ChatContext {
-    pub selected: Option<String>,
-    pub latex: Option<String>,
-    pub step_title: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum ChatRole {
-    User,
-    Assistant,
-}
-
-impl std::fmt::Display for ChatRole {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ChatRole::User => write!(f, "user"),
-            ChatRole::Assistant => write!(f, "assistant"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ChatStore {
-    pub messages: Vec<ChatMessage>,
-}
+use crate::document::{ChatMessage, ChatRole, ChatStore, Selection};
 
 pub struct Session {
     pub dir: PathBuf,

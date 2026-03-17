@@ -9,7 +9,8 @@ mod unicode;
 
 use clap::Parser;
 use cli::{Cli, Command};
-use session::{ChatMessage, ChatRole, Session};
+use document::{ChatMessage, ChatRole};
+use session::Session;
 
 fn main() {
     // KaTeX's embedded JS engine (QuickJS) has a 256KB internal stack limit.
@@ -42,6 +43,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         Command::Result { title, latex } => cmd_result(&title, &latex),
         Command::Divider => cmd_divider(),
         Command::Render { latex, output } => cmd_render(&latex, output.as_deref()),
+        Command::Serve { file, port } => cmd_serve(&file, port),
         Command::Stop => cmd_stop(),
         Command::Export { output } => cmd_export(&output),
         Command::Status => cmd_status(),
@@ -78,7 +80,7 @@ fn cmd_new(title: &str) -> Result<(), Box<dyn std::error::Error>> {
     println!("Board live at {}", url);
 
     // Block the main thread so the server stays alive until Ctrl+C
-    server::start_server(&session, port)?;
+    server::start_server_for_session(&session, port)?;
 
     Ok(())
 }
@@ -132,19 +134,31 @@ fn cmd_divider() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn cmd_render(latex: &str, output: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
-    let rendered = render::render_equation(latex)
-        .map_err(|e| format!("KaTeX error: {}", e))?;
-
-    let html = format!(
-        r#"<!DOCTYPE html>
+fn cmd_render(input: &str, output: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let html = if input == "-" {
+        // Read from stdin
+        let mut content = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut content)?;
+        render_content_to_html(&content)
+    } else if input.ends_with(".cb.md") || input.ends_with(".md") {
+        // Render a .cb.md file
+        let content = std::fs::read_to_string(input)
+            .map_err(|_| format!("Could not read file: {}", input))?;
+        render_content_to_html(&content)
+    } else {
+        // Single LaTeX equation (original behavior)
+        let rendered = render::render_equation(input)
+            .map_err(|e| format!("KaTeX error: {}", e))?;
+        format!(
+            r#"<!DOCTYPE html>
 <html><head>
 <meta charset="UTF-8">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css">
 <style>body {{ display:flex; justify-content:center; align-items:center; min-height:100vh; margin:0; background:#1a1a2e; color:#e0e0e0; }}</style>
 </head><body>{}</body></html>"#,
-        rendered
-    );
+            rendered
+        )
+    };
 
     match output {
         Some(path) => {
@@ -164,6 +178,60 @@ fn cmd_render(latex: &str, output: Option<&str>) -> Result<(), Box<dyn std::erro
         }
     }
 
+    Ok(())
+}
+
+fn render_content_to_html(content: &str) -> String {
+    let doc = parser::parse(content);
+    let blocks_html = render::render_blocks_html(&doc);
+    let title = &doc.title;
+
+    format!(
+        r#"<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8">
+<title>{title} — cliboard</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css">
+<style>
+body {{ margin:0; padding:2rem; background:#1C1917; color:#e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }}
+h1 {{ color: #CA8A04; font-size: 1.5rem; margin-bottom: 2rem; }}
+.step {{ margin: 1.5rem 0; padding: 1.5rem; background: #292524; border-radius: 8px; }}
+.step.result {{ border-left: 3px solid #CA8A04; }}
+.step-header {{ margin-bottom: 1rem; }}
+.step-number {{ color: #CA8A04; font-weight: bold; margin-right: 0.5rem; }}
+.step-title {{ font-size: 1.1rem; font-weight: 600; }}
+.equation-card {{ text-align: center; margin: 1rem 0; padding: 1rem; position: relative; }}
+.equation-number {{ position: absolute; right: 1rem; top: 50%; transform: translateY(-50%); color: #78716C; font-family: KaTeX_Main, serif; }}
+.note {{ color: #A8A29E; border-left: 2px solid #44403C; padding-left: 1rem; margin: 0.75rem 0; }}
+.prose {{ margin: 1rem 0; color: #D6D3D1; }}
+.divider {{ border: none; border-top: 1px solid #44403C; margin: 2rem 0; }}
+.error-card {{ background: #451a1a; border: 1px solid #dc2626; padding: 1rem; border-radius: 4px; }}
+.error-card code {{ color: #fca5a5; }}
+.error-msg {{ color: #f87171; font-size: 0.85rem; margin-top: 0.5rem; }}
+.error-inline {{ color: #f87171; background: #451a1a; padding: 0 4px; border-radius: 2px; }}
+</style>
+</head><body>
+<h1>{title}</h1>
+{blocks_html}
+</body></html>"#
+    )
+}
+
+fn cmd_serve(file: &str, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+    let path = std::path::PathBuf::from(file)
+        .canonicalize()
+        .map_err(|_| format!("File not found: {}", file))?;
+
+    let port = server::find_available_port(port)?;
+    let url = format!("http://localhost:{}", port);
+    let _ = open::that(&url);
+    println!("Serving {} at {}", file, url);
+
+    server::start_server(server::ServerConfig {
+        board_path: path,
+        port,
+        session_dir: None,
+    })?;
     Ok(())
 }
 
@@ -211,7 +279,7 @@ fn cmd_import(input: &str) -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Board live at {}", url);
 
-    server::start_server(&session, port)?;
+    server::start_server_for_session(&session, port)?;
 
     Ok(())
 }
@@ -622,4 +690,36 @@ fn is_pid_alive(pid: u32) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_cmd_serve_missing_file() {
+        let result = cmd_serve("/nonexistent/file.cb.md", 8377);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_render_content_to_html_basic() {
+        let content = "---\ntitle: Test\n---\n\n## Step 1\n\n$$E = mc^2$$\n";
+        let html = render_content_to_html(content);
+        assert!(html.contains("Test"));
+        assert!(html.contains("katex"));
+        assert!(html.contains("Step 1"));
+    }
+
+    #[test]
+    fn test_render_content_to_html_empty() {
+        let html = render_content_to_html("");
+        assert!(html.contains("Untitled"));
+    }
+
+    #[test]
+    fn test_cmd_render_missing_file() {
+        let result = cmd_render("/nonexistent/file.cb.md", None);
+        assert!(result.is_err());
+    }
 }

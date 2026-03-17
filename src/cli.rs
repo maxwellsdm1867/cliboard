@@ -45,13 +45,21 @@ pub enum Command {
     },
     /// Add a section divider
     Divider,
-    /// Render a single equation (one-shot, no session)
+    /// Render LaTeX or a .cb.md file (one-shot, no session)
     Render {
-        /// LaTeX equation (use - for stdin)
+        /// LaTeX equation, .cb.md file path, or - for stdin
         latex: String,
         /// Output file (opens in browser if omitted)
         #[arg(short, long)]
         output: Option<String>,
+    },
+    /// Serve a .cb.md file with live-reload (no session, no chat)
+    Serve {
+        /// Path to .cb.md file to serve
+        file: String,
+        /// Port to serve on
+        #[arg(short, long, default_value = "8377")]
+        port: u16,
     },
     /// Stop the current session server
     Stop,

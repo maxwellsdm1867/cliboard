@@ -12,7 +12,8 @@ use tungstenite::WebSocket;
 
 use crate::parser;
 use crate::render;
-use crate::session::{ChatContext, ChatMessage, ChatRole, ChatStore, Session};
+use crate::document::{ChatContext, ChatMessage, ChatRole, ChatStore};
+use crate::session::Session;
 
 #[derive(Embed)]
 #[folder = "katex-assets/"]
@@ -30,24 +31,42 @@ struct RenderedState {
 /// A list of connected WebSocket clients, protected by a mutex.
 type WsClients = Arc<Mutex<Vec<WebSocket<TcpStream>>>>;
 
+/// Configuration for the HTTP server.
+///
+/// When `session_dir` is `None`, the server runs in "serve" mode:
+/// only the board viewer is active — chat and selection endpoints are disabled.
+/// When `session_dir` is `Some(dir)`, full interactive mode with chat, selection,
+/// PID/port tracking, and reply hooks.
+pub struct ServerConfig {
+    pub board_path: PathBuf,
+    pub port: u16,
+    /// Optional session directory for interactive features.
+    /// When None, chat/selection endpoints return 404.
+    pub session_dir: Option<PathBuf>,
+}
+
 /// Start the HTTP server in the foreground (blocking).
 ///
 /// Serves the viewer, KaTeX assets, and the /board polling endpoint.
 /// Also starts a WebSocket server on port+1 for instant push updates.
 /// Watches the board file for changes and re-renders automatically.
-pub fn start_server(
-    session: &Session,
-    preferred_port: u16,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let port = find_available_port(preferred_port)?;
+pub fn start_server(config: ServerConfig) -> Result<(), Box<dyn std::error::Error>> {
+    let port = find_available_port(config.port)?;
     let addr = format!("127.0.0.1:{}", port);
     let server =
         Server::http(&addr).map_err(|e| format!("Failed to bind to {}: {}", addr, e))?;
 
-    session.write_pid(std::process::id())?;
-    session.write_port(port)?;
+    // Write PID/port files only in interactive (session) mode
+    if let Some(ref session_dir) = config.session_dir {
+        let session = Session {
+            dir: session_dir.clone(),
+            board_path: config.board_path.clone(),
+        };
+        session.write_pid(std::process::id())?;
+        session.write_port(port)?;
+    }
 
-    let board_path = session.board_path.clone();
+    let board_path = config.board_path;
     let state = initial_render(&board_path);
     let state = Arc::new(Mutex::new(state));
     let version = Arc::new(AtomicU64::new(1));
@@ -65,16 +84,26 @@ pub fn start_server(
         Arc::clone(&ws_clients),
     );
 
-    let session_dir = session.dir.clone();
-
     eprintln!("cliboard server listening on http://localhost:{}", port);
     eprintln!("cliboard WebSocket server on ws://localhost:{}", ws_port);
 
     for request in server.incoming_requests() {
-        handle_request(request, &state, &version, &session_dir, ws_port, &ws_clients);
+        handle_request(request, &state, &version, &config.session_dir, ws_port, &ws_clients);
     }
 
     Ok(())
+}
+
+/// Start the server from a Session (convenience wrapper for interactive mode).
+pub fn start_server_for_session(
+    session: &Session,
+    preferred_port: u16,
+) -> Result<(), Box<dyn std::error::Error>> {
+    start_server(ServerConfig {
+        board_path: session.board_path.clone(),
+        port: preferred_port,
+        session_dir: Some(session.dir.clone()),
+    })
 }
 
 fn initial_render(board_path: &Path) -> RenderedState {
@@ -91,7 +120,7 @@ fn handle_request(
     request: tiny_http::Request,
     state: &Arc<Mutex<RenderedState>>,
     version: &Arc<AtomicU64>,
-    session_dir: &Path,
+    session_dir: &Option<PathBuf>,
     ws_port: u16,
     ws_clients: &WsClients,
 ) {
@@ -99,11 +128,27 @@ fn handle_request(
 
     match request.method() {
         Method::Get if url == "/chat" || url.starts_with("/chat?") => {
-            handle_get_chat(request, session_dir)
+            if let Some(ref dir) = session_dir {
+                handle_get_chat(request, dir)
+            } else {
+                respond_not_found(request)
+            }
         }
         Method::Get => handle_get(request, &url, state, version, ws_port),
-        Method::Post if url == "/select" => handle_select(request, session_dir),
-        Method::Post if url == "/chat" => handle_post_chat(request, session_dir, ws_clients),
+        Method::Post if url == "/select" => {
+            if let Some(ref dir) = session_dir {
+                handle_select(request, dir)
+            } else {
+                respond_not_found(request)
+            }
+        }
+        Method::Post if url == "/chat" => {
+            if let Some(ref dir) = session_dir {
+                handle_post_chat(request, dir, ws_clients)
+            } else {
+                respond_not_found(request)
+            }
+        }
         _ => respond_not_found(request),
     }
 }

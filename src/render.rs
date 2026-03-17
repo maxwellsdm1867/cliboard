@@ -140,14 +140,14 @@ fn normalize_latex(s: &str) -> String {
 /// Extract equation context from existing reply messages for a step.
 /// Returns (known_eqs map, next offset) for use with `render_reply_content_ctx`.
 pub fn reply_equation_context(
-    messages: &[crate::session::ChatMessage],
+    messages: &[crate::document::ChatMessage],
     step_id: usize,
 ) -> (std::collections::HashMap<String, String>, usize) {
     let mut known = std::collections::HashMap::new();
     let mut max_sub = 0usize;
 
     for msg in messages {
-        if msg.step_id != step_id || msg.role != crate::session::ChatRole::Assistant {
+        if msg.step_id != step_id || msg.role != crate::document::ChatRole::Assistant {
             continue;
         }
         // Extract $$...$$ equations and their assigned numbers from this reply

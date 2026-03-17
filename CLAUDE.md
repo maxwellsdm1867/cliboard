@@ -63,7 +63,7 @@ Parsed into: `Document { title, theme, blocks: [Step | Prose | Divider] }`
 cargo build                    # debug build
 cargo build --release          # release build (opt-level=z, strip, LTO)
 cargo run -- <subcommand>      # run during development
-cargo test                     # run tests (221 tests)
+cargo test                     # run tests (242 tests)
 cargo clippy                   # lint
 cargo fmt                      # format
 ```
@@ -101,7 +101,15 @@ Client JS only handles polling, diffing, auto-scroll, selection.
 | `/viewer.js` | GET | Viewer JavaScript |
 | `/katex/katex.min.css` | GET | Embedded KaTeX CSS |
 | `/katex/fonts/*` | GET | Embedded KaTeX woff2 fonts |
-| `/select` | POST | Receive selection from viewer, return `{ ok, unicode, formatted }` |
+| `/select` | POST | Receive selection from viewer, return `{ ok, unicode, formatted }` (interactive mode only) |
+| `/chat` | GET/POST | Chat messages (interactive mode only) |
+
+## Server Modes
+
+The server runs in two modes via `ServerConfig`:
+
+- **Serve mode** (`session_dir: None`): Board viewer + live-reload only. Chat/selection endpoints return 404. Used by `cliboard serve`.
+- **Interactive mode** (`session_dir: Some(dir)`): Full features — chat, selection, PID/port tracking, reply hooks. Used by `cliboard new`.
 
 ## Performance Targets
 
@@ -120,7 +128,8 @@ Client JS only handles polling, diffing, auto-scroll, selection.
 - **File-level locking**: fs4 for concurrent writes to `.cb.md`
 - **Positional step IDs**: Steps identified by position of `##` headings (1-indexed)
 - **Default port 8377**, falls back to next available
-- **VS Code detection**: `$TERM_PROGRAM == "vscode"` -> Simple Browser, else system default
+- **Toolkit, not monolith**: `render`, `serve`, and `new` are independent entry points at increasing levels of commitment
+- **Decoupled server**: `ServerConfig` with optional `session_dir` — serve mode (no session) vs interactive mode (full features)
 - **Localhost only**: Server binds to 127.0.0.1, not 0.0.0.0
 - **Bounded POST body**: /select endpoint limited to 64KB
 - **Version-based polling**: 304 short-circuit when client has latest version
@@ -131,11 +140,11 @@ Client JS only handles polling, diffing, auto-scroll, selection.
 src/
 ├── main.rs          # CLI entry point, command dispatch, browser opening
 ├── cli.rs           # clap command definitions (Cli struct + Command enum)
-├── document.rs      # Document, Block, Theme, Selection types
+├── document.rs      # Document, Block, Theme, Selection, Chat types (decoupled from session)
 ├── parser.rs        # .cb.md → Document model (pulldown-cmark with math + heading attrs)
 ├── render.rs        # Document → HTML (katex-rs, equation numbers, inline math in titles/notes)
-├── server.rs        # HTTP server (tiny_http), file watching, /board + /select endpoints
-├── session.rs       # Session management (~/.cliboard/sessions/), file locking, PID/port
+├── server.rs        # HTTP server (tiny_http), file watching, ServerConfig for serve/interactive modes
+├── session.rs       # Session management (~/.cliboard/sessions/), file locking, PID/port (interactive mode only)
 ├── unicode.rs       # LaTeX → Unicode conversion (Greek, operators, scripts, accents, matrices)
 ├── export.rs        # Self-contained HTML export (inlined CSS, CDN font fallback)
 └── lib.rs           # Module declarations
@@ -153,7 +162,7 @@ katex-assets/
 └── fonts/           # 20 KaTeX woff2 font files (embedded via rust-embed)
 
 tests/
-└── integration.rs   # 13 integration tests (parse→render pipeline, export, edge cases)
+└── integration.rs   # 14 integration tests (parse→render pipeline, export, edge cases)
 ```
 
 ## Session File Layout
@@ -173,8 +182,8 @@ tests/
 
 ## Module Relationships
 
-- `main.rs` dispatches CLI commands. `cmd_new` creates a session and starts the server (blocking). Other `cmd_*` functions find the current session and append to `board.cb.md`.
-- `server.rs` watches the board file via `notify`, re-parses and re-renders on change, serves via `/board` as JSON. Returns 304 when client version matches. POST `/select` does LaTeX→Unicode conversion and returns formatted text.
+- `main.rs` dispatches CLI commands. `cmd_new` creates a session and starts the server (interactive mode). `cmd_serve` starts the server in serve mode (no session). `cmd_render` handles one-shot rendering of equations, files, or stdin. Other `cmd_*` functions find the current session and append to `board.cb.md`.
+- `server.rs` accepts a `ServerConfig` with optional `session_dir`. Watches the board file via `notify`, re-parses and re-renders on change, serves via `/board` as JSON. Returns 304 when client version matches. Chat/selection endpoints are only active in interactive mode (when `session_dir` is set).
 - `render.rs` calls `katex-rs` for each equation with auto-incrementing equation numbers. Processes inline `$...$` math in titles, notes, and prose. Errors render as red cards, never panics.
 - `parser.rs` uses `pulldown-cmark` with `ENABLE_MATH` and `ENABLE_HEADING_ATTRIBUTES` to parse `.cb.md` into the `Document` model.
 - `unicode.rs` converts LaTeX to terminal-friendly Unicode. Handles Greek letters, operators, fractions, scripts, accents, matrices, and preserves meaningful whitespace around operators.
@@ -191,7 +200,7 @@ cliboard step 'Why $\sqrt{d_k}$?' "..."                     # math in title
 ## Testing
 
 ```bash
-cargo test              # run all 221 tests
+cargo test              # run all 242 tests
 cargo test parser       # run parser tests only
 cargo test unicode      # run unicode tests only
 cargo test -- --nocapture  # see println output
