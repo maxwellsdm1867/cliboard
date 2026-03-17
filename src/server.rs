@@ -469,7 +469,10 @@ fn handle_post_chat(mut request: tiny_http::Request, session_dir: &Path, ws_clie
                 } else {
                     // Default: use claude CLI
                     eprintln!("[chat] Auto-replying with claude CLI for step {}", step_id);
-                    thread::spawn(move || {
+                    thread::Builder::new()
+                        .stack_size(8 * 1024 * 1024)
+                        .name("claude-reply".into())
+                        .spawn(move || {
                         // Read board for context
                         let board_path = session_dir_owned.join("board.cb.md");
                         let board = std::fs::read_to_string(&board_path).unwrap_or_default();
@@ -536,7 +539,7 @@ fn handle_post_chat(mut request: tiny_http::Request, session_dir: &Path, ws_clie
                                 eprintln!("[chat] Failed to run claude: {}", e);
                             }
                         }
-                    });
+                    }).ok();
                 }
             }
 
@@ -641,7 +644,11 @@ fn start_file_watcher(
 
     let watch_path = board_path.clone();
 
-    thread::spawn(move || {
+    // KaTeX's JS engine needs more stack space than the default 2MB
+    thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .name("file-watcher".into())
+        .spawn(move || {
         let (tx, rx) = std::sync::mpsc::channel();
 
         let mut watcher = match notify::recommended_watcher(tx) {
@@ -727,5 +734,5 @@ fn start_file_watcher(
                 }
             }
         }
-    });
+    }).expect("Failed to spawn file watcher thread");
 }
