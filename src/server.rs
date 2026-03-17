@@ -249,6 +249,10 @@ fn handle_select(mut request: tiny_http::Request, session_dir: &Path) {
         title: String,
         latex: String,
         text: String,
+        #[serde(default)]
+        reply_context: Option<String>,
+        #[serde(default)]
+        eq_num: Option<String>,
     }
 
     match serde_json::from_str::<SelectRequest>(&body) {
@@ -270,20 +274,30 @@ fn handle_select(mut request: tiny_http::Request, session_dir: &Path) {
             let global = PathBuf::from(home).join(".cliboard").join("selection.json");
             let _ = std::fs::write(&global, &json);
 
-            // If user selected a partial snippet, format as:
-            //   {selected} in [Step N] {full equation}
-            // If full selection or empty, just:
-            //   [Step N] {full equation}
+            // Format the clipboard text with context
             let full_eq = &selection.unicode;
             let sel_chars = selected_text.chars().count();
             let eq_chars = full_eq.chars().count();
             let is_partial = !selected_text.is_empty()
                 && sel_chars < eq_chars
-                && sel_chars <= eq_chars * 3 / 4; // selection is less than 75% of equation
-            let formatted = if is_partial {
-                format!("{} in [Step {}] {}", selected_text, selection.step_id, full_eq)
+                && sel_chars <= eq_chars * 3 / 4;
+
+            // Build step label: "[Step N]" or "[Step N → (N.M)]" for reply equations
+            let step_label = match &sel_req.eq_num {
+                Some(num) => format!("[Step {} \u{2192} ({})]", selection.step_id, num),
+                None => format!("[Step {}]", selection.step_id),
+            };
+
+            let eq_text = if is_partial {
+                format!("{} in {} {}", selected_text, step_label, full_eq)
             } else {
-                format!("[Step {}] {}", selection.step_id, full_eq)
+                format!("{} {}", step_label, full_eq)
+            };
+
+            // Prepend reply context (user question) if present
+            let formatted = match &sel_req.reply_context {
+                Some(ctx) if !ctx.is_empty() => format!("Q: \"{}\"\n{}", ctx, eq_text),
+                _ => eq_text,
             };
             let resp_json = serde_json::json!({
                 "ok": true,

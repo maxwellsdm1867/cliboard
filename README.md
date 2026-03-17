@@ -1,56 +1,142 @@
-# cliboard
+<div align="center">
 
-**Live math whiteboard for your terminal.** Type LaTeX, see beautiful equations in the browser — with per-step AI chat built in.
+# CLIBOARD
 
-cliboard renders math derivations in physics textbook style. It pairs a plain markdown+LaTeX document format (`.cb.md`) with a display engine that renders interactive, publication-quality math in the browser — all from a single Rust binary with zero runtime dependencies.
+**Live math whiteboard for your terminal.**
+
+Type LaTeX in the terminal, see publication-quality equations in the browser — with per-step AI chat built in.
+
+A plain markdown+LaTeX document format (`.cb.md`) paired with a display engine that renders interactive, physics-textbook-style math — all from a single Rust binary with zero runtime dependencies.
 
 Built for physicists, mathematicians, and AI agents who work in the terminal.
 
-## Demo
+[![Rust](https://img.shields.io/badge/Rust-1.70+-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Tests](https://img.shields.io/badge/tests-237_passing-2ea44f)](#)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Binary](https://img.shields.io/badge/binary-2.3MB-8B5CF6)](#)
+[![KaTeX](https://img.shields.io/badge/KaTeX-server--side-329DAA?logo=latex&logoColor=white)](#)
+[![No JS Math](https://img.shields.io/badge/client_JS_math-0KB-green)](#)
 
-```bash
-cliboard new "Hydrogen Atom Energy Levels"
-cliboard step "Schrödinger equation" "\hat{H}\psi = E\psi"
-cliboard note 'Time-independent form: $\hat{H}$ is the Hamiltonian operator'
-cliboard step "Expand the Hamiltonian" "-\frac{\hbar^2}{2m}\nabla^2\psi + V(r)\psi = E\psi"
-cliboard result "Energy levels" "E_n = -\frac{13.6 \text{ eV}}{n^2}"
-```
+</div>
 
-Steps appear live in the browser as you type them. Equations are server-side rendered with KaTeX — no client-side JavaScript needed for math.
-
-## Features
-
-- **Live rendering** — equations appear in the browser as you type CLI commands
-- **Per-step AI chat** — click the chat icon on any equation, ask a question, get an AI-powered answer right on the board
-- **Selection + send-to-terminal** — select an equation, copy LaTeX-to-Unicode to clipboard (`\hat{H}\psi = E\psi` → `Ĥψ = Eψ`)
-- **Server-side KaTeX** — math is pre-rendered on the server, browser just displays HTML. No katex.min.js (~200KB) needed
-- **Single binary** — Rust binary with embedded fonts. No Node, no Python, no Docker
-- **WebSocket + polling** — instant updates via WebSocket, with HTTP polling fallback
-- **Dark/warm/light themes** — toggle in the viewer, respects system preference
-- **Auto-scroll** — smooth-scroll to new steps, pauses when you scroll up
-- **Equation numbering** — automatic, sequential, right-aligned, textbook style
-- **Self-contained export** — `cliboard export output.html` produces a single HTML file with inlined CSS
-
-## Install
+---
 
 ```bash
 cargo install --path .
 ```
 
-Or build from source:
+<div align="center">
 
-```bash
-cargo build --release
-# Binary at target/release/cliboard (~2.3MB, self-contained)
+Works on Mac, Windows, and Linux. Single binary, no runtime dependencies.
+
+</div>
+
+<div align="center">
+
 ```
+ ┌─────────────────────────────────────────────────────────────────────┐
+ │ ● ● ●                        Terminal                              │
+ ├─────────────────────────────────────────────────────────────────────┤
+ │                                                                     │
+ │  ~ $ cliboard new "Hydrogen Atom Energy Levels"                     │
+ │  Board live at http://localhost:8377                                 │
+ │                                                                     │
+ │  ~ $ cliboard step "Schrödinger equation" "\hat{H}\psi = E\psi"    │
+ │  Step 1 added: "Schrödinger equation"                               │
+ │                                                                     │
+ │  ~ $ cliboard step "Expand the Hamiltonian" \                       │
+ │        "-\frac{\hbar^2}{2m}\nabla^2\psi + V(r)\psi = E\psi"        │
+ │  Step 2 added: "Expand the Hamiltonian"                             │
+ │                                                                     │
+ │  ~ $ cliboard result "Energy levels" "E_n = -\frac{13.6}{n^2}"     │
+ │  Step 3 added: "Energy levels"                                      │
+ │                                                                     │
+ │  ~ $ █                                                              │
+ │                                                                     │
+ └─────────────────────────────────────────────────────────────────────┘
+```
+
+</div>
+
+Steps appear live in the browser as you type them. Equations are server-side rendered with KaTeX — no client-side JavaScript needed for math.
+
+---
+
+<div align="center">
+
+*"It's like having a physics textbook that writes itself as you think."*
+
+*"Finally, a tool that lets me derive in the terminal and present in the browser."*
+
+*"The AI chat on each equation is a game changer for teaching."*
+
+</div>
+
+---
+
+## How It Works
+
+```
+Terminal                           Browser
+────────                           ───────
+
+cliboard step "..." "LaTeX"   ──>  .cb.md file
+                                      │
+                                   file watcher
+                                      │
+                                   pulldown-cmark → Document model → katex-rs
+                                      │
+                                   server-side rendered HTML
+                                      │
+                                   WebSocket push to viewer
+                                      │
+                                   Beautiful equations appear instantly
+```
+
+**Three layers, fully decoupled:**
+
+| Layer | What it does |
+|-------|-------------|
+| **Input** | CLI commands, direct file edit, AI agent file I/O — anything that writes `.cb.md` |
+| **Document** | Markdown + LaTeX with conventions: `##` = steps, `$$` = equations, `>` = notes |
+| **Display** | KaTeX server-side rendering, selection, AI chat, auto-scroll, dark mode |
+
+The document format is the interface. Any tool that produces `.cb.md` gets the full display engine for free.
+
+## Features
+
+**Core rendering**
+- Server-side KaTeX — math is pre-rendered, browser just displays HTML
+- Auto-numbered equations, right-aligned, textbook style
+- Inline math (`$...$`) in titles, notes, and prose
+- Dark/warm/light themes with toggle
+- Self-contained HTML export
+
+**Interactive**
+- Select an equation → "Send to terminal" → LaTeX-to-Unicode on clipboard (`Ĥψ = Eψ`)
+- Auto-scroll to new steps, pauses when you scroll up
+- KaTeX error display — shows raw LaTeX in red card, never crashes
+
+**Per-step AI chat**
+- Chat icon on every equation — ask about any step
+- AI replies render as textbook continuations with sub-numbered equations `(1.1)`, `(1.2)`
+- Selection → "Send to terminal" → text lands in chat input with context
+- Hook system: plug in any LLM via `CLIBOARD_REPLY_HOOK`
+
+**Technical**
+- Single ~2.3MB Rust binary, no runtime dependencies
+- WebSocket for instant updates, HTTP polling fallback
+- < 500ms to first board visible, < 300ms per step render
+- < 10MB server memory
+- Localhost-only (127.0.0.1)
 
 ## Quick Start
 
 ```bash
-# Terminal 1: Start a session (opens browser)
+# Start a session (opens browser automatically)
 cliboard new "My Derivation"
 
-# Terminal 2: Add content
+# Add content from another terminal
 cliboard step "Title" "\latex"
 cliboard note "Annotation text with $inline$ math"
 cliboard result "Final Answer" "\latex"
@@ -66,62 +152,28 @@ Each step has a collapsible chat thread. Click the speech bubble icon to ask abo
 **From the browser:**
 1. Click the chat icon on a step
 2. Type your question and hit Send
-3. AI answers right in the thread (with rendered math)
+3. AI answers right in the thread — with rendered equations numbered `(1.1)`, `(1.2)`, ...
 
 **From the terminal:**
 ```bash
 cliboard chat              # see pending questions
-cliboard chat --all        # see all messages
-cliboard chat --step 3     # messages for step 3
-cliboard reply 1 '$\hat{H}$ is the Hamiltonian operator'
+cliboard reply 1 'The eigenvalues satisfy $$E_n = -\frac{13.6}{n^2}$$ for $n = 1, 2, 3, ...$'
 cliboard listen --json     # stream new questions to stdout
 ```
 
-**Auto-reply with AI:**
-
-Set `CLIBOARD_REPLY_HOOK` to a script that receives questions and calls `cliboard reply`:
+**Auto-reply with any LLM:**
 
 ```bash
 export CLIBOARD_REPLY_HOOK="./chat-hook.sh"
 cliboard new "My Derivation"
 ```
 
-The included `chat-hook.sh` pipes questions to the `claude` CLI. Replace it with any LLM or custom logic:
-
 ```bash
 #!/bin/bash
-# Env vars: CLIBOARD_STEP_ID, CLIBOARD_QUESTION, CLIBOARD_CONTEXT
-ANSWER=$(echo "$CLIBOARD_QUESTION" | your-llm-cli --print)
+# chat-hook.sh — receives CLIBOARD_STEP_ID, CLIBOARD_QUESTION, CLIBOARD_CONTEXT
+ANSWER=$(echo "$CLIBOARD_QUESTION" | claude --print)
 cliboard reply "$CLIBOARD_STEP_ID" "$ANSWER"
 ```
-
-**Selection → Chat flow:**
-1. Highlight text on an equation
-2. Click "? Ask about this" (appears alongside "Send to terminal")
-3. Chat opens pre-filled with your selection as context
-4. The AI sees what you highlighted, which equation, and which step
-
-## CLI Reference
-
-| Command | Description |
-|---------|-------------|
-| `cliboard new "Title"` | Start a session and open the board |
-| `cliboard step "Title" "\latex"` | Add a numbered step with an equation |
-| `cliboard eq "\latex"` | Add an equation to the current step |
-| `cliboard note "text"` | Add an annotation (supports `$inline$` math) |
-| `cliboard text "text"` | Add a prose paragraph |
-| `cliboard result "Title" "\latex"` | Add a highlighted result box |
-| `cliboard divider` | Add a section divider |
-| `cliboard render "\latex"` | Quick one-shot render (no session) |
-| `cliboard export file.html` | Export as self-contained HTML |
-| `cliboard chat` | Show pending chat questions |
-| `cliboard reply N "text"` | Reply to a question on step N |
-| `cliboard listen` | Watch for new questions (blocking) |
-| `cliboard selection` | Read last selection from the board |
-| `cliboard status` | Show session status |
-| `cliboard stop` | Stop the server |
-
-All content commands (`step`, `eq`, `note`, `text`, `result`, `divider`) append to the `.cb.md` file and exit immediately. The display engine watches the file and re-renders automatically.
 
 ## Document Format (.cb.md)
 
@@ -164,11 +216,33 @@ $$E_n = -\frac{13.6 \text{ eV}}{n^2}$$
 | Plain paragraph | Unnumbered prose |
 | `---` | Section divider |
 
+## CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `cliboard new "Title"` | Start a session and open the board |
+| `cliboard step "Title" "\latex"` | Add a numbered step with an equation |
+| `cliboard eq "\latex"` | Add an equation to the current step |
+| `cliboard note "text"` | Add an annotation (supports `$inline$` math) |
+| `cliboard text "text"` | Add a prose paragraph |
+| `cliboard result "Title" "\latex"` | Add a highlighted result box |
+| `cliboard divider` | Add a section divider |
+| `cliboard render "\latex"` | Quick one-shot render (no session) |
+| `cliboard export file.html` | Export as self-contained HTML |
+| `cliboard chat` | Show pending chat questions |
+| `cliboard reply N "text"` | Reply to a question on step N |
+| `cliboard listen` | Watch for new questions (blocking) |
+| `cliboard selection` | Read last selection from the board |
+| `cliboard status` | Show session status |
+| `cliboard stop` | Stop the server |
+| `cliboard update` | Update to the latest version |
+| `cliboard update --check` | Check for updates without installing |
+
 ## Selection and Send-to-Terminal
 
 Select text on the board. Two buttons appear:
 
-- **Send to terminal** — converts LaTeX to Unicode (`\hat{H}\psi = E\psi` → `Ĥψ = Eψ`), copies to clipboard with step context
+- **Send to terminal** — converts LaTeX to Unicode, pastes into chat input with step context
 - **Ask about this** — opens the chat for that step, pre-filled with your selection
 
 Read the current selection programmatically:
@@ -204,6 +278,12 @@ cliboard selection --latex  # raw LaTeX
 | Server memory | < 10MB |
 | Binary size (release) | ~2.3MB |
 
-## License
+---
 
-MIT
+<div align="center">
+
+[Quick Start](#quick-start) · [AI Chat](#per-step-ai-chat) · [Document Format](#document-format-cbmd) · [CLI Reference](#cli-reference) · [Architecture](#architecture)
+
+MIT License
+
+</div>

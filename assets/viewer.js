@@ -244,6 +244,36 @@
         return null;
     }
 
+    // Check if node is inside a reply, return { replyEquation, userQuestion } or null
+    function getReplyContext(node) {
+        var el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        var replyEq = null;
+        var chatMsg = null;
+        while (el && el !== document.body) {
+            if (el.classList && el.classList.contains("reply-equation")) replyEq = el;
+            if (el.classList && el.classList.contains("cb-chat-msg") && el.classList.contains("assistant")) chatMsg = el;
+            el = el.parentElement;
+        }
+        if (!chatMsg) return null;
+        // Find preceding user message in the same thread
+        var userQuestion = "";
+        var prev = chatMsg.previousElementSibling;
+        while (prev) {
+            if (prev.classList && prev.classList.contains("cb-chat-msg") && prev.classList.contains("user")) {
+                // Get the text content, skip context/time divs
+                var textDiv = prev.querySelector("div:not(.cb-chat-context):not(.cb-chat-time)");
+                userQuestion = textDiv ? textDiv.textContent.trim() : prev.textContent.trim();
+                break;
+            }
+            prev = prev.previousElementSibling;
+        }
+        return {
+            latex: replyEq ? (replyEq.getAttribute("data-latex") || "") : "",
+            eqNum: replyEq ? (replyEq.getAttribute("data-eq-num") || "") : "",
+            userQuestion: userQuestion
+        };
+    }
+
     function handleSelectionChange() {
         var sel = window.getSelection();
         if (!sel || sel.isCollapsed || !sel.rangeCount) {
@@ -258,7 +288,8 @@
             return;
         }
 
-        showSendBtn(range, stepEl);
+        var replyCtx = getReplyContext(range.startContainer);
+        showSendBtn(range, stepEl, replyCtx);
     }
 
     // "Ask about this" button (created once, reused)
@@ -270,15 +301,21 @@
     askBtn.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.4)";
     document.body.appendChild(askBtn);
 
-    function showSendBtn(range, stepEl) {
+    function showSendBtn(range, stepEl, replyCtx) {
         var rect = range.getBoundingClientRect();
         sendBtn.classList.remove("hidden");
-        askBtn.classList.remove("hidden");
+        // Only show "Ask about this" for main step equations, not reply content
+        if (replyCtx) {
+            askBtn.classList.add("hidden");
+        } else {
+            askBtn.classList.remove("hidden");
+        }
 
-        // Measure both buttons
+        // Measure buttons
         var sendWidth = sendBtn.offsetWidth;
-        var askWidth = askBtn.offsetWidth;
-        var totalWidth = sendWidth + 6 + askWidth; // 6px gap
+        var askWidth = replyCtx ? 0 : askBtn.offsetWidth;
+        var gap = replyCtx ? 0 : 6;
+        var totalWidth = sendWidth + gap + askWidth;
         var left = rect.left + rect.width / 2 - totalWidth / 2;
         var top = rect.top - 40;
 
@@ -292,17 +329,21 @@
         sendBtn.style.left = left + "px";
         sendBtn.style.top = top + "px";
 
-        askBtn.style.left = (left + sendWidth + 6) + "px";
-        askBtn.style.top = top + "px";
+        if (!replyCtx) {
+            askBtn.style.left = (left + sendWidth + 6) + "px";
+            askBtn.style.top = top + "px";
+        }
 
-        // Store the step element for click handlers
+        // Store context for click handlers
         sendBtn._stepEl = stepEl;
+        sendBtn._replyCtx = replyCtx || null;
         askBtn._stepEl = stepEl;
     }
 
     function hideSendBtn() {
         sendBtn.classList.add("hidden");
         sendBtn._stepEl = null;
+        sendBtn._replyCtx = null;
         askBtn.classList.add("hidden");
         askBtn._stepEl = null;
     }
@@ -334,7 +375,12 @@
 
         var stepId = stepEl.getAttribute("data-step-id") || "?";
         var stepTitle = stepEl.getAttribute("data-step-title") || "";
-        var latex = stepEl.getAttribute("data-latex") || "";
+        var replyCtx = sendBtn._replyCtx;
+
+        // For reply equations, use the reply equation's latex; otherwise use step's
+        var latex = replyCtx && replyCtx.latex
+            ? replyCtx.latex
+            : (stepEl.getAttribute("data-latex") || "");
 
         // Get selected text as fallback
         var sel = window.getSelection();
@@ -345,26 +391,45 @@
         hideSendBtn();
 
         // POST to /select — server does proper LaTeX→Unicode conversion
-        // Then copy the server's unicode result to clipboard
+        var payload = {
+            step_id: parseInt(stepId, 10) || 0,
+            title: stepTitle,
+            latex: latex,
+            text: selectedText
+        };
+        // Add reply context if selecting from a reply
+        if (replyCtx) {
+            if (replyCtx.userQuestion) payload.reply_context = replyCtx.userQuestion;
+            if (replyCtx.eqNum) payload.eq_num = replyCtx.eqNum;
+        }
+
         fetch("/select", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                step_id: parseInt(stepId, 10) || 0,
-                title: stepTitle,
-                latex: latex,
-                text: selectedText
-            })
+            body: JSON.stringify(payload)
         }).then(function (res) {
             return res.json();
         }).then(function (data) {
-            // Use server's properly converted unicode text
             var clipText = data.formatted || ("[Step " + stepId + "] " + selectedText);
-            return copyToClipboard(clipText).then(function () {
-                showToast("Step " + stepId + " \u2192 clipboard");
-            });
+            // Paste into chat input so user can keep typing around it
+            var chatInput = document.querySelector('.cb-chat-input[data-step="' + stepId + '"]');
+            if (chatInput) {
+                // Open the chat thread
+                openChats[stepId] = true;
+                var thread = document.querySelector('.cb-chat-thread[data-step="' + stepId + '"]');
+                if (thread) thread.classList.add("open");
+                // Insert at cursor or append
+                var before = chatInput.value.substring(0, chatInput.selectionStart || chatInput.value.length);
+                var after = chatInput.value.substring(chatInput.selectionEnd || chatInput.value.length);
+                chatInput.value = before + clipText + " " + after;
+                chatInputDrafts[stepId] = chatInput.value;
+                chatInput.focus();
+                // Place cursor right after the inserted text
+                var cursorPos = before.length + clipText.length + 1;
+                chatInput.setSelectionRange(cursorPos, cursorPos);
+            }
+            showToast("\u2192 chat input");
         }).catch(function () {
-            // Fallback: copy browser text if server fails
             var clipText = "[Step " + stepId + "] " + selectedText;
             copyToClipboard(clipText).then(function () {
                 showToast("Step " + stepId + " \u2192 clipboard");
@@ -502,9 +567,13 @@
                     ? '<div class="cb-chat-context">Re: "' + escapeHtml(m.context.selected) + '"' +
                       (m.context.step_title ? " in " + escapeHtml(m.context.step_title) : "") + '</div>'
                     : "";
+                // Assistant messages use server-rendered HTML (trusted); user messages are escaped
+                var bodyHtml = m.role === "assistant" && m.rendered
+                    ? m.rendered
+                    : '<div>' + escapeHtml(m.text) + '</div>';
                 return '<div class="cb-chat-msg ' + escapeHtml(m.role) + '">' +
                     contextHtml +
-                    '<div>' + escapeHtml(m.text) + '</div>' +
+                    bodyHtml +
                     '<div class="cb-chat-time">' + new Date(m.timestamp).toLocaleTimeString() + '</div>' +
                     '</div>';
             }).join("");

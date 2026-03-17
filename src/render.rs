@@ -23,6 +23,91 @@ pub fn render_chat_text(text: &str) -> String {
     process_inline_math(text)
 }
 
+/// Render reply content with display equations (sub-numbered) and inline math.
+///
+/// Splits on `$$...$$` delimiters:
+/// - Display equations → KaTeX display mode with sub-numbering `(step_id.1)`, `(step_id.2)`, ...
+/// - Prose between equations → inline math processed, wrapped in `<p class="reply-prose">`
+pub fn render_reply_content(text: &str, step_id: usize) -> String {
+    let mut result = String::with_capacity(text.len() * 2);
+    result.push_str("<div class=\"reply-content\">");
+
+    let mut eq_sub = 0usize;
+    let mut rest = text;
+
+    loop {
+        match rest.find("$$") {
+            Some(start) => {
+                // Prose before the equation
+                let prose = &rest[..start];
+                let prose_trimmed = prose.trim();
+                if !prose_trimmed.is_empty() {
+                    result.push_str("<p class=\"reply-prose\">");
+                    result.push_str(&process_inline_math(prose_trimmed));
+                    result.push_str("</p>");
+                }
+
+                // Find closing $$
+                let after_open = &rest[start + 2..];
+                match after_open.find("$$") {
+                    Some(end) => {
+                        let latex = after_open[..end].trim();
+                        eq_sub += 1;
+
+                        if latex.is_empty() {
+                            // Empty equation, skip
+                            rest = &after_open[end + 2..];
+                            continue;
+                        }
+
+                        match render_equation(latex) {
+                            Ok(rendered) => {
+                                result.push_str(&format!(
+                                    "<div class=\"equation-card reply-equation\" data-latex=\"{}\" data-eq-num=\"{}.{}\"><div class=\"equation-content\">{}</div><span class=\"equation-number\">({}.{})</span></div>",
+                                    html_escape(latex), step_id, eq_sub, rendered, step_id, eq_sub
+                                ));
+                            }
+                            Err(err_msg) => {
+                                result.push_str("<div class=\"equation-card reply-equation error-card\">");
+                                result.push_str("<code>");
+                                result.push_str(&html_escape(latex));
+                                result.push_str("</code>");
+                                result.push_str("<div class=\"error-msg\">");
+                                result.push_str(&html_escape(&err_msg));
+                                result.push_str("</div></div>");
+                            }
+                        }
+                        rest = &after_open[end + 2..];
+                    }
+                    None => {
+                        // Unclosed $$, treat rest as prose
+                        let remaining = rest.trim();
+                        if !remaining.is_empty() {
+                            result.push_str("<p class=\"reply-prose\">");
+                            result.push_str(&process_inline_math(remaining));
+                            result.push_str("</p>");
+                        }
+                        break;
+                    }
+                }
+            }
+            None => {
+                // No more equations, remaining is prose
+                let remaining = rest.trim();
+                if !remaining.is_empty() {
+                    result.push_str("<p class=\"reply-prose\">");
+                    result.push_str(&process_inline_math(remaining));
+                    result.push_str("</p>");
+                }
+                break;
+            }
+        }
+    }
+
+    result.push_str("</div>");
+    result
+}
+
 /// HTML-escape a string for use in attributes.
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -519,5 +604,74 @@ mod tests {
         let html = render_block(&block);
         assert!(html.contains("error-card"));
         assert!(html.contains("error-msg"));
+    }
+
+    #[test]
+    fn test_render_reply_content_prose_only() {
+        let html = render_reply_content("Just some text with $x^2$ inline", 1);
+        assert!(html.contains("reply-content"));
+        assert!(html.contains("reply-prose"));
+        assert!(html.contains("katex"));
+        assert!(!html.contains("equation-card"));
+    }
+
+    #[test]
+    fn test_render_reply_content_single_equation() {
+        let html = render_reply_content("Before $$E = mc^2$$ after", 3);
+        assert!(html.contains("reply-content"));
+        assert!(html.contains("reply-equation"));
+        assert!(html.contains("(3.1)"));
+        assert!(html.contains("Before"));
+        assert!(html.contains("after"));
+    }
+
+    #[test]
+    fn test_render_reply_content_multiple_equations() {
+        let html = render_reply_content("Start $$a = 1$$ middle $$b = 2$$ end", 2);
+        assert!(html.contains("(2.1)"));
+        assert!(html.contains("(2.2)"));
+        assert!(html.contains("Start"));
+        assert!(html.contains("middle"));
+        assert!(html.contains("end"));
+    }
+
+    #[test]
+    fn test_render_reply_content_equation_only() {
+        let html = render_reply_content("$$x = 1$$", 1);
+        assert!(html.contains("(1.1)"));
+        assert!(html.contains("equation-card"));
+        // No prose paragraphs
+        assert!(!html.contains("reply-prose"));
+    }
+
+    #[test]
+    fn test_render_reply_content_invalid_latex() {
+        let html = render_reply_content("Bad: $$\\frac{$$ ok", 1);
+        assert!(html.contains("error-card"));
+        assert!(html.contains("ok"));
+    }
+
+    #[test]
+    fn test_render_reply_content_empty() {
+        let html = render_reply_content("", 1);
+        assert!(html.contains("reply-content"));
+        assert!(!html.contains("reply-prose"));
+        assert!(!html.contains("equation-card"));
+    }
+
+    #[test]
+    fn test_render_reply_content_inline_math_in_prose() {
+        let html = render_reply_content("Where $n$ is the quantum number $$E_n = -13.6/n^2$$", 1);
+        assert!(html.contains("(1.1)"));
+        // Inline math in prose should be rendered
+        assert!(html.contains("katex"));
+    }
+
+    #[test]
+    fn test_render_reply_content_unclosed_display_math() {
+        let html = render_reply_content("Text $$ unclosed", 1);
+        // Should treat as prose, not crash
+        assert!(html.contains("reply-prose"));
+        assert!(!html.contains("equation-card"));
     }
 }

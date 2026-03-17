@@ -96,4 +96,10 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Update cliboard to the latest version
+    Update {
+        /// Just check for updates, don't install
+        #[arg(long)]
+        check: bool,
+    },
 }

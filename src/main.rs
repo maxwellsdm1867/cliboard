@@ -37,6 +37,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         Command::Chat { all, step, json } => cmd_chat(all, step, json),
         Command::Reply { step_id, text } => cmd_reply(step_id, text),
         Command::Listen { json } => cmd_listen(json),
+        Command::Update { check } => cmd_update(check),
     }
 }
 
@@ -283,7 +284,7 @@ fn cmd_chat(all: bool, step: Option<usize>, json: bool) -> Result<(), Box<dyn st
 
 fn cmd_reply(step_id: usize, text: String) -> Result<(), Box<dyn std::error::Error>> {
     let session = require_session()?;
-    let rendered = render::render_chat_text(&text);
+    let rendered = render::render_reply_content(&text, step_id);
     let timestamp_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_millis();
@@ -362,6 +363,200 @@ fn cmd_listen(json: bool) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+const GITHUB_REPO: &str = "maxwellsdm1867/cliboard";
+
+fn cmd_update(check_only: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let current = env!("CARGO_PKG_VERSION");
+    println!("cliboard v{}", current);
+    println!("Checking for updates...");
+
+    // Fetch latest release from GitHub API
+    let output = std::process::Command::new("curl")
+        .args([
+            "-fsSL",
+            "-H",
+            "Accept: application/vnd.github+json",
+            &format!(
+                "https://api.github.com/repos/{}/releases/latest",
+                GITHUB_REPO
+            ),
+        ])
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("404") || output.status.code() == Some(22) {
+            println!("No releases published yet.");
+            println!(
+                "Build from source: cargo install --path . (or cargo build --release)"
+            );
+            return Ok(());
+        }
+        return Err("Failed to check for updates. Check your internet connection.".into());
+    }
+
+    let body = String::from_utf8(output.stdout)?;
+    let release: serde_json::Value = serde_json::from_str(&body)?;
+
+    let latest = release["tag_name"]
+        .as_str()
+        .ok_or("Could not parse latest version")?
+        .trim_start_matches('v');
+
+    if latest == current {
+        println!("Already on the latest version.");
+        return Ok(());
+    }
+
+    println!("New version available: v{} -> v{}", current, latest);
+
+    if check_only {
+        println!(
+            "Run `cliboard update` to install, or visit:\n  https://github.com/{}/releases/tag/v{}",
+            GITHUB_REPO, latest
+        );
+        return Ok(());
+    }
+
+    // Determine platform target triple
+    let target = target_triple();
+
+    // Find the right asset in the release
+    let asset_name = format!("cliboard-{}.tar.gz", target);
+    let assets = release["assets"]
+        .as_array()
+        .ok_or("No assets in release")?;
+
+    // cargo-dist may use slightly different naming, try both patterns
+    let download_url = assets
+        .iter()
+        .find(|a| {
+            let name = a["name"].as_str().unwrap_or("");
+            name == asset_name || name.contains(target)
+        })
+        .and_then(|a| a["browser_download_url"].as_str())
+        .ok_or_else(|| {
+            format!(
+                "No prebuilt binary for your platform ({}).\n\
+                 Install from source: cargo install --path .",
+                target
+            )
+        })?;
+
+    println!("Downloading...");
+
+    let tmp_dir = tempfile::tempdir()?;
+    let tmp_archive = tmp_dir.path().join("cliboard.tar.gz");
+
+    let status = std::process::Command::new("curl")
+        .args(["-fsSL", "-o"])
+        .arg(&tmp_archive)
+        .arg(download_url)
+        .status()?;
+
+    if !status.success() {
+        return Err("Download failed.".into());
+    }
+
+    // Extract
+    let status = std::process::Command::new("tar")
+        .arg("xzf")
+        .arg(&tmp_archive)
+        .arg("-C")
+        .arg(tmp_dir.path())
+        .status()?;
+
+    if !status.success() {
+        return Err("Failed to extract archive.".into());
+    }
+
+    // Find the cliboard binary in extracted files (cargo-dist may nest it)
+    let new_bin = find_binary_in_dir(tmp_dir.path())
+        .ok_or("Could not find cliboard binary in downloaded archive.")?;
+
+    // Replace current binary
+    let current_exe = std::env::current_exe()?;
+    let backup = current_exe.with_extension("old");
+
+    // Backup current binary
+    std::fs::rename(&current_exe, &backup)?;
+
+    match std::fs::copy(&new_bin, &current_exe) {
+        Ok(_) => {
+            // Set executable permissions on Unix
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(
+                    &current_exe,
+                    std::fs::Permissions::from_mode(0o755),
+                )?;
+            }
+            let _ = std::fs::remove_file(&backup);
+            println!("Updated to v{}!", latest);
+        }
+        Err(e) => {
+            // Restore from backup
+            let _ = std::fs::rename(&backup, &current_exe);
+            return Err(format!("Install failed: {}. Restored previous version.", e).into());
+        }
+    }
+
+    Ok(())
+}
+
+/// Find the cliboard binary in a directory tree (handles cargo-dist nesting).
+fn find_binary_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let bin_name = if cfg!(windows) {
+        "cliboard.exe"
+    } else {
+        "cliboard"
+    };
+
+    // Check top level
+    let direct = dir.join(bin_name);
+    if direct.exists() {
+        return Some(direct);
+    }
+
+    // Check one level deep (cargo-dist puts it in a subdirectory)
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let nested = entry.path().join(bin_name);
+            if nested.exists() {
+                return Some(nested);
+            }
+        }
+    }
+
+    None
+}
+
+/// Get the target triple for the current platform.
+fn target_triple() -> &'static str {
+    #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
+    { "aarch64-apple-darwin" }
+    #[cfg(all(target_arch = "x86_64", target_os = "macos"))]
+    { "x86_64-apple-darwin" }
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+    { "x86_64-unknown-linux-gnu" }
+    #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+    { "aarch64-unknown-linux-gnu" }
+    #[cfg(all(target_arch = "x86_64", target_os = "windows"))]
+    { "x86_64-pc-windows-msvc" }
+    #[cfg(all(target_arch = "aarch64", target_os = "windows"))]
+    { "aarch64-pc-windows-msvc" }
+    #[cfg(not(any(
+        all(target_arch = "aarch64", target_os = "macos"),
+        all(target_arch = "x86_64", target_os = "macos"),
+        all(target_arch = "x86_64", target_os = "linux"),
+        all(target_arch = "aarch64", target_os = "linux"),
+        all(target_arch = "x86_64", target_os = "windows"),
+        all(target_arch = "aarch64", target_os = "windows"),
+    )))]
+    { "unknown" }
 }
 
 /// Check if a process with the given PID is alive.
