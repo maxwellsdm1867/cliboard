@@ -575,6 +575,9 @@
                 }
             }
 
+            // Check if thinking indicator was present before re-render
+            var hadThinking = !!container.querySelector(".cb-thinking");
+
             container.innerHTML = msgs.map(function (m) {
                 var contextHtml = m.context && m.context.selected
                     ? '<div class="cb-chat-context">Re: "' + escapeHtml(m.context.selected) + '"' +
@@ -590,6 +593,14 @@
                     '<div class="cb-chat-time">' + new Date(m.timestamp).toLocaleTimeString() + '</div>' +
                     '</div>';
             }).join("");
+
+            // Re-add thinking indicator if it was there and last message is from user
+            if (hadThinking && msgs.length > 0 && msgs[msgs.length - 1].role === "user") {
+                var indicator = document.createElement("div");
+                indicator.className = "cb-thinking";
+                indicator.innerHTML = '<span class="cb-thinking-text">Thinking</span><span class="cb-thinking-dots"><span></span><span></span><span></span></span>';
+                container.appendChild(indicator);
+            }
 
             // Scroll to bottom of messages
             if (msgs.length > 0) container.scrollTop = container.scrollHeight;
@@ -740,17 +751,18 @@
 
         var indicator = document.createElement("div");
         indicator.className = "cb-thinking";
-        indicator.innerHTML = '<span class="cb-thinking-text">Thinking</span><span class="cb-thinking-dots"></span>';
+        indicator.innerHTML = '<span class="cb-thinking-text">Thinking</span><span class="cb-thinking-dots"><span></span><span></span><span></span></span>';
         messagesContainer.appendChild(indicator);
 
-        // Auto-scroll to show the indicator
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-
-        // Open the chat thread if it's closed
+        // Open the chat thread and track it so it survives re-renders
+        openChats[stepId] = true;
         var thread = step.querySelector(".cb-chat-thread");
         if (thread && !thread.classList.contains("open")) {
             thread.classList.add("open");
         }
+
+        // Auto-scroll to show the indicator
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
     }
 
     function removeThinkingIndicators() {
