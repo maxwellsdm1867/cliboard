@@ -18,6 +18,7 @@
     var openChats = {};        // stepId -> true/false (which threads are open)
     var chatInputDrafts = {};  // stepId -> string (preserve drafts across re-renders)
     var chatMessages = [];     // all messages from server
+    var thinkingSteps = {};    // stepId -> true (which steps are showing thinking indicator)
     var selectionContext = null; // stored context from "Ask about this"
 
     // --- DOM refs ---
@@ -575,9 +576,6 @@
                 }
             }
 
-            // Check if thinking indicator was present before re-render
-            var hadThinking = !!container.querySelector(".cb-thinking");
-
             container.innerHTML = msgs.map(function (m) {
                 var contextHtml = m.context && m.context.selected
                     ? '<div class="cb-chat-context">Re: "' + escapeHtml(m.context.selected) + '"' +
@@ -594,16 +592,13 @@
                     '</div>';
             }).join("");
 
-            // Re-add thinking indicator if it was there and last message is from user
-            if (hadThinking && msgs.length > 0 && msgs[msgs.length - 1].role === "user") {
-                var indicator = document.createElement("div");
-                indicator.className = "cb-thinking";
-                indicator.innerHTML = '<span class="cb-thinking-text">Thinking</span><span class="cb-thinking-dots"><span></span><span></span><span></span></span>';
-                container.appendChild(indicator);
+            // Show thinking indicator from state (survives any re-render)
+            if (thinkingSteps[stepId]) {
+                container.innerHTML += '<div class="cb-thinking"><span class="cb-thinking-text">Thinking</span><span class="cb-thinking-dots"><span></span><span></span><span></span></span></div>';
             }
 
             // Scroll to bottom of messages
-            if (msgs.length > 0) container.scrollTop = container.scrollHeight;
+            if (msgs.length > 0 || thinkingSteps[stepId]) container.scrollTop = container.scrollHeight;
         }
 
         // Restore open states
@@ -740,36 +735,14 @@
     // --- Thinking indicator ---
 
     function showThinkingIndicator(stepId) {
-        // Find the chat messages container for this step
-        var step = document.querySelector('.step[data-step-id="' + stepId + '"]');
-        if (!step) return;
-        var messagesContainer = step.querySelector(".cb-chat-messages");
-        if (!messagesContainer) return;
-
-        // Don't add duplicate
-        if (messagesContainer.querySelector(".cb-thinking")) return;
-
-        var indicator = document.createElement("div");
-        indicator.className = "cb-thinking";
-        indicator.innerHTML = '<span class="cb-thinking-text">Thinking</span><span class="cb-thinking-dots"><span></span><span></span><span></span></span>';
-        messagesContainer.appendChild(indicator);
-
-        // Open the chat thread and track it so it survives re-renders
+        thinkingSteps[stepId] = true;
         openChats[stepId] = true;
-        var thread = step.querySelector(".cb-chat-thread");
-        if (thread && !thread.classList.contains("open")) {
-            thread.classList.add("open");
-        }
-
-        // Auto-scroll to show the indicator
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        // Re-render to show the indicator
+        renderChatMessages();
     }
 
     function removeThinkingIndicators() {
-        var indicators = document.querySelectorAll(".cb-thinking");
-        for (var i = 0; i < indicators.length; i++) {
-            indicators[i].remove();
-        }
+        thinkingSteps = {};
     }
 
     // --- Toast ---
