@@ -628,6 +628,10 @@ body {
     font-size: 0.85em;
     font-weight: 500;
     transition: background 0.2s;
+    pointer-events: auto;
+}
+.cb-ask-btn.hidden {
+    display: none !important;
 }
 .cb-ask-btn:hover {
     background: var(--result-bg);

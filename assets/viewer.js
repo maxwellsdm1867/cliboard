@@ -178,6 +178,9 @@
 
         lastBlocksHtml = data.blocks_html;
 
+        // Hide selection buttons before DOM replacement
+        hideSendBtn();
+
         // Replace content
         boardContent.innerHTML = data.blocks_html;
 
