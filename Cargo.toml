@@ -1,6 +1,6 @@
 [package]
 name = "cliboard"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Live math whiteboard for your terminal — render LaTeX equations in the browser with per-step AI chat"
 keywords = ["math", "latex", "whiteboard", "claude", "ai-agent"]
