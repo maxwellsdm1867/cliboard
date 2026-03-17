@@ -2,7 +2,40 @@ use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::document::Selection;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub id: String,
+    pub step_id: usize,
+    pub role: ChatRole,
+    pub text: String,
+    pub rendered: String,
+    pub timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<ChatContext>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ChatContext {
+    pub selected: Option<String>,
+    pub latex: Option<String>,
+    pub step_title: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatRole {
+    User,
+    Assistant,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ChatStore {
+    pub messages: Vec<ChatMessage>,
+}
 
 pub struct Session {
     pub dir: PathBuf,
@@ -121,6 +154,86 @@ impl Session {
             .trim()
             .parse()
             .ok()
+    }
+
+    /// Path to the messages.json file.
+    pub fn messages_path(&self) -> PathBuf {
+        self.dir.join("messages.json")
+    }
+
+    /// Read all chat messages from messages.json.
+    /// Returns an empty ChatStore if the file doesn't exist.
+    pub fn read_messages(&self) -> std::io::Result<ChatStore> {
+        let path = self.messages_path();
+        if !path.exists() {
+            return Ok(ChatStore::default());
+        }
+        let data = fs::read_to_string(&path)?;
+        serde_json::from_str(&data).map_err(std::io::Error::other)
+    }
+
+    /// Append a message to messages.json atomically with file locking.
+    pub fn append_message(&self, msg: ChatMessage) -> std::io::Result<()> {
+        use fs4::fs_std::FileExt;
+
+        let path = self.messages_path();
+
+        // Create the file if it doesn't exist so we can lock it
+        if !path.exists() {
+            fs::write(&path, r#"{"messages":[]}"#)?;
+        }
+
+        let lock_file = fs::OpenOptions::new().read(true).open(&path)?;
+        lock_file.lock_exclusive()?;
+
+        let mut store: ChatStore = {
+            let data = fs::read_to_string(&path)?;
+            serde_json::from_str(&data).unwrap_or_default()
+        };
+        store.messages.push(msg);
+
+        let json = serde_json::to_string_pretty(&store).map_err(std::io::Error::other)?;
+
+        // Atomic write: write to temp file, then rename
+        let tmp_path = path.with_extension("json.tmp");
+        fs::write(&tmp_path, &json)?;
+        fs::rename(&tmp_path, &path)?;
+
+        lock_file.unlock()?;
+        Ok(())
+    }
+
+    /// Return messages where the last message for each step_id is from a User
+    /// (i.e., unanswered questions).
+    pub fn pending_messages(&self) -> std::io::Result<Vec<ChatMessage>> {
+        let store = self.read_messages()?;
+        // Group by step_id, find steps where last message is from User
+        let mut last_by_step: std::collections::HashMap<usize, &ChatMessage> =
+            std::collections::HashMap::new();
+        for msg in &store.messages {
+            last_by_step.insert(msg.step_id, msg);
+        }
+        let pending_step_ids: std::collections::HashSet<usize> = last_by_step
+            .iter()
+            .filter(|(_, msg)| msg.role == ChatRole::User)
+            .map(|(step_id, _)| *step_id)
+            .collect();
+        // Return all messages from pending steps (for context)
+        Ok(store
+            .messages
+            .into_iter()
+            .filter(|m| pending_step_ids.contains(&m.step_id))
+            .collect())
+    }
+
+    /// Return messages for a specific step.
+    pub fn messages_for_step(&self, step_id: usize) -> std::io::Result<Vec<ChatMessage>> {
+        let store = self.read_messages()?;
+        Ok(store
+            .messages
+            .into_iter()
+            .filter(|m| m.step_id == step_id)
+            .collect())
     }
 }
 

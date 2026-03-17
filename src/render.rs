@@ -18,6 +18,11 @@ pub fn render_inline_math(latex: &str) -> Result<String, String> {
     katex::render_with_opts(latex, opts).map_err(|e| e.to_string())
 }
 
+/// Render chat text with inline math support.
+pub fn render_chat_text(text: &str) -> String {
+    process_inline_math(text)
+}
+
 /// HTML-escape a string for use in attributes.
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -30,7 +35,7 @@ fn html_escape(s: &str) -> String {
 /// Process inline math (`$...$`) in text, rendering each with KaTeX.
 /// Non-math text is HTML-escaped to prevent XSS.
 /// Does not match `$$...$$` (display math).
-fn process_inline_math(text: &str) -> String {
+pub(crate) fn process_inline_math(text: &str) -> String {
     let mut result = String::with_capacity(text.len());
     let chars: Vec<char> = text.chars().collect();
     let len = chars.len();

@@ -2,7 +2,11 @@
 name = "cliboard"
 version = "0.1.0"
 edition = "2021"
-description = "Live math rendering board for CLI agents and scientists"
+description = "Live math whiteboard for your terminal — render LaTeX equations in the browser with per-step AI chat"
+keywords = ["math", "latex", "whiteboard", "katex", "cli"]
+categories = ["command-line-utilities", "mathematics", "visualization"]
+repository = "https://github.com/maxwellsdm1867/cliboard"
+license = "MIT"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

@@ -12,7 +12,7 @@ use tungstenite::WebSocket;
 
 use crate::parser;
 use crate::render;
-use crate::session::Session;
+use crate::session::{ChatContext, ChatMessage, ChatRole, ChatStore, Session};
 
 #[derive(Embed)]
 #[folder = "katex-assets/"]
@@ -71,7 +71,7 @@ pub fn start_server(
     eprintln!("cliboard WebSocket server on ws://localhost:{}", ws_port);
 
     for request in server.incoming_requests() {
-        handle_request(request, &state, &version, &session_dir, ws_port);
+        handle_request(request, &state, &version, &session_dir, ws_port, &ws_clients);
     }
 
     Ok(())
@@ -93,12 +93,17 @@ fn handle_request(
     version: &Arc<AtomicU64>,
     session_dir: &Path,
     ws_port: u16,
+    ws_clients: &WsClients,
 ) {
     let url = request.url().to_string();
 
     match request.method() {
+        Method::Get if url == "/chat" || url.starts_with("/chat?") => {
+            handle_get_chat(request, session_dir)
+        }
         Method::Get => handle_get(request, &url, state, version, ws_port),
         Method::Post if url == "/select" => handle_select(request, session_dir),
+        Method::Post if url == "/chat" => handle_post_chat(request, session_dir, ws_clients),
         _ => respond_not_found(request),
     }
 }
@@ -191,6 +196,7 @@ fn serve_board(
         (st.title.clone(), st.blocks_html.clone())
     };
     let json = serde_json::json!({
+        "type": "board_update",
         "version": ver,
         "title": title,
         "blocks_html": blocks_html,
@@ -295,6 +301,145 @@ fn handle_select(mut request: tiny_http::Request, session_dir: &Path) {
     }
 }
 
+/// Handle GET /chat: return all messages as JSON.
+fn handle_get_chat(request: tiny_http::Request, session_dir: &Path) {
+    let session = Session {
+        dir: session_dir.to_path_buf(),
+        board_path: session_dir.join("board.cb.md"),
+    };
+    match session.read_messages() {
+        Ok(store) => {
+            let json = serde_json::json!({ "messages": store.messages });
+            let header = Header::from_bytes("Content-Type", "application/json").unwrap();
+            let resp = Response::from_string(json.to_string()).with_header(header);
+            let _ = request.respond(resp);
+        }
+        Err(_) => {
+            let json = serde_json::json!({ "messages": [] });
+            let header = Header::from_bytes("Content-Type", "application/json").unwrap();
+            let resp = Response::from_string(json.to_string()).with_header(header);
+            let _ = request.respond(resp);
+        }
+    }
+}
+
+/// Handle POST /chat: receive a chat message from the viewer.
+fn handle_post_chat(mut request: tiny_http::Request, session_dir: &Path, ws_clients: &WsClients) {
+    const MAX_BODY_SIZE: usize = 64 * 1024; // 64KB limit
+
+    let content_length = request.body_length().unwrap_or(0);
+    if content_length > MAX_BODY_SIZE {
+        let resp = Response::from_string("Payload Too Large").with_status_code(StatusCode(413));
+        let _ = request.respond(resp);
+        return;
+    }
+
+    let mut body = String::new();
+    if request
+        .as_reader()
+        .take(MAX_BODY_SIZE as u64 + 1)
+        .read_to_string(&mut body)
+        .is_err()
+    {
+        let resp = Response::from_string("Bad Request").with_status_code(StatusCode(400));
+        let _ = request.respond(resp);
+        return;
+    }
+
+    if body.len() > MAX_BODY_SIZE {
+        let resp = Response::from_string("Payload Too Large").with_status_code(StatusCode(413));
+        let _ = request.respond(resp);
+        return;
+    }
+
+    #[derive(serde::Deserialize)]
+    struct ChatRequest {
+        step_id: usize,
+        text: String,
+        #[serde(default)]
+        context: Option<ChatContext>,
+    }
+
+    match serde_json::from_str::<ChatRequest>(&body) {
+        Ok(chat_req) => {
+            let rendered = crate::render::render_chat_text(&chat_req.text);
+            let timestamp_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+
+            // Capture values for the reply hook before msg is moved
+            let hook_step_id = chat_req.step_id;
+            let hook_text = chat_req.text.clone();
+            let hook_context = chat_req.context.clone();
+
+            let msg = ChatMessage {
+                id: format!("{:x}", timestamp_ms),
+                step_id: chat_req.step_id,
+                role: ChatRole::User,
+                text: chat_req.text,
+                rendered,
+                timestamp: chrono::Local::now().to_rfc3339(),
+                context: chat_req.context,
+            };
+
+            let session = Session {
+                dir: session_dir.to_path_buf(),
+                board_path: session_dir.join("board.cb.md"),
+            };
+
+            if let Err(e) = session.append_message(msg) {
+                eprintln!("Failed to append chat message: {}", e);
+                let resp =
+                    Response::from_string("Internal Server Error").with_status_code(StatusCode(500));
+                let _ = request.respond(resp);
+                return;
+            }
+
+            // Broadcast chat update via WebSocket
+            eprintln!("[chat] POST /chat received: step={} text=\"{}\"", hook_step_id, &hook_text);
+            if let Ok(store) = session.read_messages() {
+                eprintln!("[chat] Broadcasting user msg via WebSocket ({} total messages)", store.messages.len());
+                let ws_json = serde_json::json!({
+                    "type": "chat_update",
+                    "messages": store.messages,
+                });
+                broadcast_to_ws_clients(ws_clients, &ws_json.to_string());
+            }
+
+            // Fire reply hook if configured (CLIBOARD_REPLY_HOOK env var)
+            if let Ok(hook) = std::env::var("CLIBOARD_REPLY_HOOK") {
+                eprintln!("[chat] Firing reply hook: {}", &hook);
+                let step_id = hook_step_id;
+                let text = hook_text;
+                let context_json = serde_json::to_string(&hook_context).unwrap_or_default();
+                thread::spawn(move || {
+                    let status = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(&hook)
+                        .env("CLIBOARD_STEP_ID", step_id.to_string())
+                        .env("CLIBOARD_QUESTION", &text)
+                        .env("CLIBOARD_CONTEXT", &context_json)
+                        .status();
+                    match &status {
+                        Ok(s) => eprintln!("[chat] Reply hook exited: {}", s),
+                        Err(e) => eprintln!("[chat] Reply hook failed: {}", e),
+                    }
+                });
+            }
+
+            let resp_json = serde_json::json!({ "ok": true });
+            let header = Header::from_bytes("Content-Type", "application/json").unwrap();
+            let resp = Response::from_string(resp_json.to_string()).with_header(header);
+            let _ = request.respond(resp);
+        }
+        Err(_) => {
+            let resp = Response::from_string("Bad Request").with_status_code(StatusCode(400));
+            let _ = request.respond(resp);
+        }
+    }
+}
+
 /// Start the WebSocket server on a dedicated TCP port.
 /// Accepts incoming connections and adds them to the shared client list.
 fn start_ws_server(ws_port: u16, ws_clients: WsClients) {
@@ -357,6 +502,7 @@ fn handle_ws_connection(stream: TcpStream, clients: WsClients) {
 /// Removes disconnected clients from the list.
 fn broadcast_to_ws_clients(ws_clients: &WsClients, message: &str) {
     let mut clients = ws_clients.lock().unwrap();
+    eprintln!("[ws] Broadcasting to {} client(s)", clients.len());
 
     // Iterate backwards so we can remove by index without invalidating indices
     let mut i = clients.len();
@@ -408,9 +554,15 @@ fn start_file_watcher(
                 Ok(event) => {
                     let dominated = matches!(
                         event.kind,
-                        EventKind::Modify(_) | EventKind::Create(_)
+                        EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
                     );
                     let affects_board = event.paths.iter().any(|p| p == &board_path);
+                    let messages_path = board_path.with_file_name("messages.json");
+                    let affects_messages = event.paths.iter().any(|p| {
+                        p == &messages_path
+                            || p.file_name().and_then(|n| n.to_str()) == Some("messages.json")
+                            || p.file_name().and_then(|n| n.to_str()) == Some("messages.json.tmp")
+                    });
 
                     if dominated && affects_board {
                         if let Ok(content) = std::fs::read_to_string(&board_path) {
@@ -425,6 +577,7 @@ fn start_file_watcher(
 
                             // Build the JSON payload for WebSocket broadcast
                             let json = serde_json::json!({
+                                "type": "board_update",
                                 "version": new_ver,
                                 "title": st.title,
                                 "blocks_html": st.blocks_html,
@@ -432,6 +585,28 @@ fn start_file_watcher(
                             drop(st);
 
                             broadcast_to_ws_clients(&ws_clients, &json.to_string());
+                        }
+                    }
+
+                    if dominated && affects_messages {
+                        // Broadcast chat update when messages.json changes
+                        // (e.g., from CLI `cliboard reply` or reply hook)
+                        eprintln!("[watcher] messages.json changed (event: {:?})", event.kind);
+                        // Small delay to let atomic rename complete
+                        std::thread::sleep(std::time::Duration::from_millis(50));
+                        if let Ok(data) = std::fs::read_to_string(&messages_path) {
+                            if let Ok(store) = serde_json::from_str::<ChatStore>(&data) {
+                                eprintln!("[watcher] Broadcasting chat_update via WebSocket ({} messages)", store.messages.len());
+                                let json = serde_json::json!({
+                                    "type": "chat_update",
+                                    "messages": store.messages,
+                                });
+                                broadcast_to_ws_clients(&ws_clients, &json.to_string());
+                            } else {
+                                eprintln!("[watcher] Failed to parse messages.json");
+                            }
+                        } else {
+                            eprintln!("[watcher] Failed to read messages.json");
                         }
                     }
                 }

@@ -420,3 +420,159 @@ body {
 .katex {
     color: var(--text);
 }
+
+/* ===== Chat toggle ===== */
+
+.cb-chat-toggle {
+    margin-left: auto;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    color: var(--text-muted);
+    transition: color 0.2s, background 0.2s;
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.cb-chat-toggle:hover {
+    color: var(--accent);
+    background: var(--toggle-active);
+}
+.cb-chat-toggle svg {
+    width: 18px;
+    height: 18px;
+}
+.cb-chat-badge {
+    position: absolute;
+    top: -2px;
+    right: 2px;
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 10px;
+    font-weight: 700;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+}
+
+/* ===== Chat thread ===== */
+
+.cb-chat-thread {
+    display: none;
+    border-top: 1px solid var(--border);
+}
+.cb-chat-thread.open {
+    display: block;
+    max-height: 600px;
+    overflow-y: auto;
+}
+.cb-chat-messages {
+    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* ===== Chat message bubbles ===== */
+
+.cb-chat-msg {
+    max-width: 85%;
+    padding: 8px 12px;
+    border-radius: 12px;
+    font-size: 0.9em;
+    line-height: 1.5;
+    word-wrap: break-word;
+}
+.cb-chat-msg.user {
+    align-self: flex-end;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    color: var(--text);
+}
+.cb-chat-msg.assistant {
+    align-self: flex-start;
+    background: var(--result-bg);
+    border: 1px solid var(--accent);
+    color: var(--text);
+}
+.cb-chat-msg .katex { font-size: 1em; }
+.cb-chat-context {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    font-style: italic;
+}
+.cb-chat-time {
+    font-size: 0.7em;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+/* ===== Chat input ===== */
+
+.cb-chat-input-row {
+    display: flex;
+    gap: 8px;
+    padding: 8px 16px 12px;
+    border-top: 1px solid var(--border);
+}
+.cb-chat-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-size: 0.9em;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+}
+.cb-chat-input:focus {
+    border-color: var(--accent);
+}
+.cb-chat-input::placeholder {
+    color: var(--text-muted);
+}
+.cb-chat-send {
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.85em;
+    transition: opacity 0.2s;
+}
+.cb-chat-send:hover {
+    opacity: 0.85;
+}
+.cb-chat-send:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* ===== Ask about this ===== */
+
+.cb-ask-btn {
+    background: var(--toggle-active);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 0.85em;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+.cb-ask-btn:hover {
+    background: var(--result-bg);
+}

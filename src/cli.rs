@@ -71,4 +71,29 @@ pub enum Command {
         #[arg(long)]
         latex: bool,
     },
+    /// Show chat messages (pending questions from viewers)
+    Chat {
+        /// Show all messages, not just pending
+        #[arg(long)]
+        all: bool,
+        /// Filter by step number
+        #[arg(long)]
+        step: Option<usize>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reply to a question on a specific step
+    Reply {
+        /// Step number to reply to
+        step_id: usize,
+        /// Reply text (supports $...$ inline math)
+        text: String,
+    },
+    /// Watch for new chat questions and print them to stdout (blocking)
+    Listen {
+        /// Output as JSON lines
+        #[arg(long)]
+        json: bool,
+    },
 }

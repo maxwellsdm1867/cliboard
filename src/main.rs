@@ -9,7 +9,7 @@ mod unicode;
 
 use clap::Parser;
 use cli::{Cli, Command};
-use session::Session;
+use session::{ChatMessage, ChatRole, Session};
 
 fn main() {
     let cli = Cli::parse();
@@ -34,6 +34,9 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         Command::Export { output } => cmd_export(&output),
         Command::Status => cmd_status(),
         Command::Selection { json, latex } => cmd_selection(json, latex),
+        Command::Chat { all, step, json } => cmd_chat(all, step, json),
+        Command::Reply { step_id, text } => cmd_reply(step_id, text),
+        Command::Listen { json } => cmd_listen(json),
     }
 }
 
@@ -55,17 +58,8 @@ fn cmd_new(title: &str) -> Result<(), Box<dyn std::error::Error>> {
     let port = server::find_available_port(8377)?;
     let url = format!("http://localhost:{}", port);
 
-    // Open browser: VS Code Simple Browser or system default
-    if std::env::var("TERM_PROGRAM")
-        .map(|v| v == "vscode")
-        .unwrap_or(false)
-    {
-        let _ = std::process::Command::new("code")
-            .args(["--command", "simpleBrowser.show", &url])
-            .spawn();
-    } else {
-        let _ = open::that(&url);
-    }
+    // Always open in the system default browser
+    let _ = open::that(&url);
 
     println!("Board live at {}", url);
 
@@ -230,6 +224,140 @@ fn cmd_selection(json: bool, latex: bool) -> Result<(), Box<dyn std::error::Erro
         }
         None => {
             println!("No selection yet. Click an equation on the board first.");
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_chat(all: bool, step: Option<usize>, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let session = require_session()?;
+    let store = session.read_messages()?;
+
+    let messages = if let Some(step_id) = step {
+        store
+            .messages
+            .into_iter()
+            .filter(|m| m.step_id == step_id)
+            .collect()
+    } else if all {
+        store.messages
+    } else {
+        // Show pending (unanswered) questions
+        session.pending_messages()?
+    };
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&messages)?);
+        return Ok(());
+    }
+
+    if messages.is_empty() {
+        println!("No messages.");
+        return Ok(());
+    }
+
+    for msg in &messages {
+        let role_prefix = match msg.role {
+            ChatRole::User => "Q",
+            ChatRole::Assistant => "A",
+        };
+        println!("[Step {}] {}: {}", msg.step_id, role_prefix, msg.text);
+        if let Some(ctx) = &msg.context {
+            if let (Some(selected), Some(latex)) = (&ctx.selected, &ctx.latex) {
+                let title_part = ctx
+                    .step_title
+                    .as_deref()
+                    .filter(|t| !t.is_empty())
+                    .map(|t| format!(" ({})", t))
+                    .unwrap_or_default();
+                println!(
+                    "  -> selected: \"{}\" in {}{}",
+                    selected, latex, title_part
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn cmd_reply(step_id: usize, text: String) -> Result<(), Box<dyn std::error::Error>> {
+    let session = require_session()?;
+    let rendered = render::render_chat_text(&text);
+    let timestamp_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)?
+        .as_millis();
+    let msg = ChatMessage {
+        id: format!("{:x}", timestamp_ms),
+        step_id,
+        role: ChatRole::Assistant,
+        text,
+        rendered,
+        timestamp: chrono::Local::now().to_rfc3339(),
+        context: None,
+    };
+    session.append_message(msg)?;
+    println!("Reply sent to step {}.", step_id);
+    Ok(())
+}
+
+fn cmd_listen(json: bool) -> Result<(), Box<dyn std::error::Error>> {
+    use notify::{EventKind, RecursiveMode, Watcher};
+    use std::collections::HashSet;
+
+    let session = require_session()?;
+    let messages_path = session.messages_path();
+
+    // Track which message IDs we've already printed
+    let mut seen: HashSet<String> = {
+        let store = session.read_messages()?;
+        store.messages.iter().map(|m| m.id.clone()).collect()
+    };
+
+    eprintln!("Listening for chat questions... (Ctrl+C to stop)");
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut watcher = notify::recommended_watcher(tx)?;
+
+    let watch_dir = messages_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    watcher.watch(watch_dir, RecursiveMode::NonRecursive)?;
+
+    for event_result in rx {
+        match event_result {
+            Ok(event) => {
+                let dominated = matches!(
+                    event.kind,
+                    EventKind::Modify(_) | EventKind::Create(_)
+                );
+                let affects = event.paths.iter().any(|p| p == &messages_path);
+
+                if dominated && affects {
+                    if let Ok(store) = session.read_messages() {
+                        for msg in &store.messages {
+                            if msg.role == ChatRole::User && !seen.contains(&msg.id) {
+                                seen.insert(msg.id.clone());
+                                if json {
+                                    println!("{}", serde_json::to_string(msg)?);
+                                } else {
+                                    print!("[Step {}] {}", msg.step_id, msg.text);
+                                    if let Some(ctx) = &msg.context {
+                                        if let Some(sel) = &ctx.selected {
+                                            print!("  (re: \"{}\")", sel);
+                                        }
+                                    }
+                                    println!();
+                                }
+                                // Flush immediately so piped consumers see it
+                                use std::io::Write;
+                                let _ = std::io::stdout().flush();
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => eprintln!("Watch error: {}", e),
         }
     }
 
