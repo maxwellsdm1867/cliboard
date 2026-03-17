@@ -18,7 +18,7 @@
     var openChats = {};        // stepId -> true/false (which threads are open)
     var chatInputDrafts = {};  // stepId -> string (preserve drafts across re-renders)
     var chatMessages = [];     // all messages from server
-    var thinkingSteps = {};    // stepId -> true (which steps are showing thinking indicator)
+    var thinkingSteps = {};    // stepId -> timestamp (when thinking started)
     var selectionContext = null; // stored context from "Ask about this"
 
     // --- DOM refs ---
@@ -594,7 +594,8 @@
 
             // Show thinking indicator from state (survives any re-render)
             if (thinkingSteps[stepId]) {
-                container.innerHTML += '<div class="cb-thinking"><span class="cb-thinking-text">Thinking</span><span class="cb-thinking-dots"><span></span><span></span><span></span></span></div>';
+                var elapsed = Math.round((Date.now() - thinkingSteps[stepId]) / 1000);
+                container.innerHTML += '<div class="cb-thinking"><span class="cb-thinking-text">Thinking</span><span class="cb-thinking-dots"><span></span><span></span><span></span></span><span class="cb-thinking-time" data-step="' + stepId + '">' + elapsed + 's</span></div>';
             }
 
             // Scroll to bottom of messages
@@ -734,15 +735,47 @@
 
     // --- Thinking indicator ---
 
+    var thinkingTimer = null;
+
     function showThinkingIndicator(stepId) {
-        thinkingSteps[stepId] = true;
+        thinkingSteps[stepId] = Date.now();
         openChats[stepId] = true;
-        // Re-render to show the indicator
         renderChatMessages();
+        // Start a timer to update the elapsed seconds
+        if (!thinkingTimer) {
+            thinkingTimer = setInterval(function () {
+                var hasAny = false;
+                for (var k in thinkingSteps) {
+                    if (thinkingSteps[k]) { hasAny = true; break; }
+                }
+                if (hasAny) {
+                    updateThinkingTimers();
+                } else {
+                    clearInterval(thinkingTimer);
+                    thinkingTimer = null;
+                }
+            }, 1000);
+        }
+    }
+
+    function updateThinkingTimers() {
+        var els = document.querySelectorAll(".cb-thinking-time");
+        for (var i = 0; i < els.length; i++) {
+            var stepId = els[i].getAttribute("data-step");
+            var started = thinkingSteps[stepId];
+            if (started) {
+                var secs = Math.round((Date.now() - started) / 1000);
+                els[i].textContent = secs + "s";
+            }
+        }
     }
 
     function removeThinkingIndicators() {
         thinkingSteps = {};
+        if (thinkingTimer) {
+            clearInterval(thinkingTimer);
+            thinkingTimer = null;
+        }
     }
 
     // --- Toast ---
