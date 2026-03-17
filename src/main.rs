@@ -81,6 +81,29 @@ fn cmd_new(title: &str) -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Board live at {}", url);
 
+    // Auto-start the chat agent in the background if claude CLI is available
+    let has_claude = std::process::Command::new("which")
+        .arg("claude")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    if has_claude {
+        let agent_board = session.board_path.clone();
+        let agent_dir = session.dir.clone();
+        std::thread::Builder::new()
+            .name("chat-agent".into())
+            .spawn(move || {
+                let status = std::process::Command::new(std::env::current_exe().unwrap())
+                    .args(["agent"])
+                    .status();
+                if let Err(e) = status {
+                    eprintln!("[agent] Failed to start: {}", e);
+                }
+            })?;
+        eprintln!("Chat agent started (sonnet)");
+    }
+
     // Block the main thread so the server stays alive until Ctrl+C
     server::start_server_for_session(&session, port)?;
 
