@@ -26,7 +26,7 @@ Built for physicists, mathematicians, and AI agents who work in the terminal.
 ---
 
 ```bash
-cargo install --path .
+curl -fsSL https://github.com/maxwellsdm1867/cliboard/releases/latest/download/cliboard-installer.sh | sh
 ```
 
 <div align="center">
@@ -34,6 +34,11 @@ cargo install --path .
 Works on Mac, Windows, and Linux. Single binary, no runtime dependencies.
 
 </div>
+
+Or install via Cargo:
+```bash
+cargo install cliboard
+```
 
 <div align="center">
 
