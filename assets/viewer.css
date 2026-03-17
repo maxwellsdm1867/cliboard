@@ -2,88 +2,88 @@
 
 /* ===== Theme definitions ===== */
 
-/* Dark theme (default) */
+/* Dark theme (default) — Claude-inspired warm dark */
 :root, [data-theme="dark"] {
-    --bg: #1C1917;
-    --bg-card: #292524;
-    --border: #44403C;
-    --text: #FAFAF9;
-    --text-muted: #A8A29E;
-    --text-secondary: #D6D3D1;
-    --accent: #CA8A04;
-    --accent-hover: #EAB308;
-    --result-bg: rgba(202, 138, 4, 0.05);
+    --bg: #1A1A1C;
+    --bg-card: #2A2A2E;
+    --border: #3D3D42;
+    --text: #F5F5F4;
+    --text-muted: #A1A1AA;
+    --text-secondary: #D4D4D8;
+    --accent: #DA7756;
+    --accent-hover: #E8906E;
+    --result-bg: rgba(218, 119, 86, 0.06);
     --error-bg: #451A1A;
     --error-border: #7F1D1D;
     --error-text: #FCA5A5;
-    --toast-bg: #292524;
-    --toast-border: #44403C;
+    --toast-bg: #2A2A2E;
+    --toast-border: #3D3D42;
     --toggle-bg: rgba(255, 255, 255, 0.06);
     --toggle-hover: rgba(255, 255, 255, 0.12);
-    --toggle-active: rgba(202, 138, 4, 0.2);
+    --toggle-active: rgba(218, 119, 86, 0.2);
 }
 
-/* Warm theme */
-[data-theme="warm"] {
-    --bg: #1A1412;
-    --bg-card: #2A1F1A;
-    --border: #4A3828;
-    --text: #F5E6D3;
-    --text-muted: #B89A7A;
-    --text-secondary: #D4B896;
-    --accent: #D4943A;
-    --accent-hover: #E8A94E;
-    --result-bg: rgba(212, 148, 58, 0.08);
-    --error-bg: #3A1818;
-    --error-border: #6B2020;
-    --error-text: #F0A0A0;
-    --toast-bg: #2A1F1A;
-    --toast-border: #4A3828;
-    --toggle-bg: rgba(255, 230, 200, 0.06);
-    --toggle-hover: rgba(255, 230, 200, 0.12);
-    --toggle-active: rgba(212, 148, 58, 0.2);
+/* Light theme — Claude-inspired warm cream */
+[data-theme="light"] {
+    --bg: #F7F5F0;
+    --bg-card: #FFFFFF;
+    --border: #E0DDD6;
+    --text: #1A1A1C;
+    --text-muted: #6B6B73;
+    --text-secondary: #3D3D42;
+    --accent: #C4704E;
+    --accent-hover: #B5613F;
+    --result-bg: rgba(196, 112, 78, 0.06);
+    --error-bg: #FEF2F2;
+    --error-border: #FECACA;
+    --error-text: #991B1B;
+    --toast-bg: #FFFFFF;
+    --toast-border: #E0DDD6;
+    --toggle-bg: rgba(0, 0, 0, 0.04);
+    --toggle-hover: rgba(0, 0, 0, 0.08);
+    --toggle-active: rgba(196, 112, 78, 0.12);
 }
 
-/* System theme — follows OS preference */
+/* System theme — follows OS preference (dark by default) */
 [data-theme="system"] {
-    --bg: #1C1917;
-    --bg-card: #292524;
-    --border: #44403C;
-    --text: #FAFAF9;
-    --text-muted: #A8A29E;
-    --text-secondary: #D6D3D1;
-    --accent: #CA8A04;
-    --accent-hover: #EAB308;
-    --result-bg: rgba(202, 138, 4, 0.05);
+    --bg: #1A1A1C;
+    --bg-card: #2A2A2E;
+    --border: #3D3D42;
+    --text: #F5F5F4;
+    --text-muted: #A1A1AA;
+    --text-secondary: #D4D4D8;
+    --accent: #DA7756;
+    --accent-hover: #E8906E;
+    --result-bg: rgba(218, 119, 86, 0.06);
     --error-bg: #451A1A;
     --error-border: #7F1D1D;
     --error-text: #FCA5A5;
-    --toast-bg: #292524;
-    --toast-border: #44403C;
+    --toast-bg: #2A2A2E;
+    --toast-border: #3D3D42;
     --toggle-bg: rgba(255, 255, 255, 0.06);
     --toggle-hover: rgba(255, 255, 255, 0.12);
-    --toggle-active: rgba(202, 138, 4, 0.2);
+    --toggle-active: rgba(218, 119, 86, 0.2);
 }
 
 @media (prefers-color-scheme: light) {
     [data-theme="system"] {
-        --bg: #FAFAF9;
+        --bg: #F7F5F0;
         --bg-card: #FFFFFF;
-        --border: #D6D3D1;
-        --text: #1C1917;
-        --text-muted: #78716C;
-        --text-secondary: #44403C;
-        --accent: #B45309;
-        --accent-hover: #D97706;
-        --result-bg: rgba(180, 83, 9, 0.06);
+        --border: #E0DDD6;
+        --text: #1A1A1C;
+        --text-muted: #6B6B73;
+        --text-secondary: #3D3D42;
+        --accent: #C4704E;
+        --accent-hover: #B5613F;
+        --result-bg: rgba(196, 112, 78, 0.06);
         --error-bg: #FEF2F2;
         --error-border: #FECACA;
         --error-text: #991B1B;
         --toast-bg: #FFFFFF;
-        --toast-border: #D6D3D1;
+        --toast-border: #E0DDD6;
         --toggle-bg: rgba(0, 0, 0, 0.04);
         --toggle-hover: rgba(0, 0, 0, 0.08);
-        --toggle-active: rgba(180, 83, 9, 0.12);
+        --toggle-active: rgba(196, 112, 78, 0.12);
     }
 }
 
