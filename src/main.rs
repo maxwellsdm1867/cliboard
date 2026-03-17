@@ -12,12 +12,24 @@ use cli::{Cli, Command};
 use session::{ChatMessage, ChatRole, Session};
 
 fn main() {
-    let cli = Cli::parse();
+    // KaTeX's embedded JS engine (QuickJS) needs more stack than the
+    // default thread/main-thread size, especially in debug builds.
+    // Run everything in a thread with 16MB stack.
+    let builder = std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .name("cliboard-main".into());
 
-    if let Err(e) = run(cli.command) {
-        eprintln!("Error: {}", e);
-        std::process::exit(1);
-    }
+    let handler = builder
+        .spawn(|| {
+            let cli = Cli::parse();
+            if let Err(e) = run(cli.command) {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
+            }
+        })
+        .expect("Failed to spawn main thread");
+
+    handler.join().unwrap();
 }
 
 fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
