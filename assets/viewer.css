@@ -1,0 +1,231 @@
+/* cliboard viewer — dark OLED theme */
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    scroll-behavior: smooth;
+}
+
+body {
+    background: #1C1917;
+    color: #FAFAF9;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.6;
+    font-size: 1rem;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Board layout */
+#board {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 2rem 1.5rem;
+}
+
+/* Header */
+#board-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    padding-bottom: 1.5rem;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid #44403C;
+}
+
+#board-title {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #FAFAF9;
+}
+
+#step-count {
+    font-size: 0.85rem;
+    color: #A8A29E;
+    white-space: nowrap;
+}
+
+/* Steps */
+.step {
+    margin-bottom: 2.5rem;
+}
+
+.step-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.step-number {
+    color: #A8A29E;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.step-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: #FAFAF9;
+}
+
+/* Equation cards */
+.equation-card {
+    background: #292524;
+    border: 1px solid #44403C;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 0.75rem;
+    overflow-x: auto;
+    text-align: center;
+}
+
+.equation-card .katex-display {
+    margin: 0;
+}
+
+/* Notes / annotations */
+.note {
+    color: #A8A29E;
+    font-size: 0.9rem;
+    font-style: italic;
+    padding-left: 1rem;
+    border-left: 2px solid #44403C;
+    margin-top: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Prose blocks */
+.prose {
+    color: #D6D3D1;
+    margin-bottom: 2rem;
+}
+
+/* Section dividers */
+.divider {
+    border: none;
+    border-top: 1px solid #44403C;
+    margin: 2.5rem 0;
+}
+
+/* Result boxes */
+.result {
+    border-left: 3px solid #CA8A04;
+    background: rgba(202, 138, 4, 0.05);
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 2.5rem;
+}
+
+.result .step-title {
+    color: #EAB308;
+}
+
+/* Error cards */
+.error-card {
+    background: #451A1A;
+    border: 1px solid #7F1D1D;
+    border-radius: 8px;
+    padding: 1rem;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.85rem;
+    color: #FCA5A5;
+    overflow-x: auto;
+    margin-bottom: 0.75rem;
+}
+
+/* Send-to-terminal button */
+#send-btn {
+    position: fixed;
+    background: #CA8A04;
+    color: #1C1917;
+    font-weight: 600;
+    border-radius: 6px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+    z-index: 100;
+    font-size: 0.85rem;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    user-select: none;
+    transition: background 0.15s;
+}
+
+#send-btn:hover {
+    background: #EAB308;
+}
+
+#send-btn.hidden {
+    display: none;
+}
+
+/* Toast */
+#toast {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #292524;
+    border: 1px solid #44403C;
+    color: #FAFAF9;
+    padding: 0.5rem 1.5rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    opacity: 0;
+    transition: opacity 0.3s;
+    z-index: 200;
+    pointer-events: none;
+}
+
+#toast.hidden {
+    display: none;
+}
+
+/* Fade-in animation for new steps */
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.step.new {
+    animation: fadeIn 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .step.new {
+        animation: none;
+    }
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+    #board {
+        padding: 1.25rem 1rem;
+    }
+
+    .equation-card {
+        padding: 1rem;
+    }
+
+    .result {
+        padding: 1rem;
+    }
+
+    #board-title {
+        font-size: 1.2rem;
+    }
+}
+
+/* KaTeX overrides for dark theme */
+.katex {
+    color: #FAFAF9;
+}
