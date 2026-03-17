@@ -174,7 +174,14 @@ fn cmd_export(output: &str) -> Result<(), Box<dyn std::error::Error>> {
     let session = require_session()?;
     let content = session.read_board()?;
     let doc = parser::parse(&content);
-    export::export_html(&doc, output)?;
+
+    if output.ends_with(".json") {
+        let store = session.read_messages().unwrap_or_default();
+        export::export_json(&doc, &store, output)?;
+    } else {
+        export::export_html(&doc, output)?;
+    }
+
     println!("Exported to {}", output);
     Ok(())
 }

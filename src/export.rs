@@ -1,6 +1,8 @@
-use crate::document::Document;
+use crate::document::{Block, Document};
 use crate::render;
+use crate::session::ChatStore;
 use rust_embed::Embed;
+use serde::Serialize;
 use std::fs;
 
 #[derive(Embed)]
@@ -65,6 +67,122 @@ pub fn export_html(doc: &Document, output_path: &str) -> Result<(), Box<dyn std:
 
     fs::write(output_path, html)?;
     Ok(())
+}
+
+/// Export the session as a structured JSON report.
+///
+/// Combines the derivation (steps, equations, notes) with the full
+/// conversation history, grouped by step. Designed to be read by
+/// downstream agents, used for reports, or fed into other tools.
+pub fn export_json(
+    doc: &Document,
+    messages: &ChatStore,
+    output_path: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut steps = Vec::new();
+
+    for block in &doc.blocks {
+        if let Block::Step {
+            id,
+            title,
+            equations,
+            notes,
+            is_result,
+        } = block
+        {
+            let chat: Vec<ChatEntry> = messages
+                .messages
+                .iter()
+                .filter(|m| m.step_id == *id)
+                .map(|m| ChatEntry {
+                    role: m.role.to_string(),
+                    text: m.text.clone(),
+                    timestamp: m.timestamp.clone(),
+                    context: m.context.as_ref().map(|c| ChatEntryContext {
+                        selected: c.selected.clone(),
+                        latex: c.latex.clone(),
+                        step_title: c.step_title.clone(),
+                    }),
+                })
+                .collect();
+
+            steps.push(StepExport {
+                id: *id,
+                title: title.clone(),
+                equations: equations.clone(),
+                notes: notes.clone(),
+                is_result: *is_result,
+                chat,
+            });
+        }
+    }
+
+    let report = SessionReport {
+        title: doc.title.clone(),
+        step_count: doc.step_count(),
+        message_count: messages.messages.len(),
+        steps,
+        // Include any messages not tied to a step (step_id=0 or orphaned)
+        unattached_messages: messages
+            .messages
+            .iter()
+            .filter(|m| !doc.blocks.iter().any(|b| matches!(b, Block::Step { id, .. } if *id == m.step_id)))
+            .map(|m| ChatEntry {
+                role: m.role.to_string(),
+                text: m.text.clone(),
+                timestamp: m.timestamp.clone(),
+                context: m.context.as_ref().map(|c| ChatEntryContext {
+                    selected: c.selected.clone(),
+                    latex: c.latex.clone(),
+                    step_title: c.step_title.clone(),
+                }),
+            })
+            .collect(),
+    };
+
+    let json = serde_json::to_string_pretty(&report)?;
+    fs::write(output_path, json)?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+struct SessionReport {
+    title: String,
+    step_count: usize,
+    message_count: usize,
+    steps: Vec<StepExport>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    unattached_messages: Vec<ChatEntry>,
+}
+
+#[derive(Serialize)]
+struct StepExport {
+    id: usize,
+    title: String,
+    equations: Vec<String>,
+    notes: Vec<String>,
+    is_result: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    chat: Vec<ChatEntry>,
+}
+
+#[derive(Serialize)]
+struct ChatEntry {
+    role: String,
+    text: String,
+    timestamp: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context: Option<ChatEntryContext>,
+}
+
+#[derive(Serialize)]
+struct ChatEntryContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    selected: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    latex: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    step_title: Option<String>,
 }
 
 fn html_escape(s: &str) -> String {
