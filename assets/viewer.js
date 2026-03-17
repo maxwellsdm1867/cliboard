@@ -56,9 +56,12 @@
         ws.onmessage = function (event) {
             try {
                 var data = JSON.parse(event.data);
-                if (data.type === "chat_update") {
+                if (data.type === "chat_thinking") {
+                    showThinkingIndicator(data.step_id);
+                } else if (data.type === "chat_update") {
                     console.log("[ws] Received chat_update via WebSocket:", (data.messages || []).length, "messages");
                     chatMessages = data.messages || [];
+                    removeThinkingIndicators();
                     renderChatMessages();
                     stopChatPoll(); // Got update via WS, stop polling
                 } else {
@@ -712,6 +715,40 @@
             chatInputDrafts[e.target.getAttribute("data-step")] = e.target.value;
         }
     });
+
+    // --- Thinking indicator ---
+
+    function showThinkingIndicator(stepId) {
+        // Find the chat messages container for this step
+        var step = document.querySelector('.step[data-step-id="' + stepId + '"]');
+        if (!step) return;
+        var messagesContainer = step.querySelector(".cb-chat-messages");
+        if (!messagesContainer) return;
+
+        // Don't add duplicate
+        if (messagesContainer.querySelector(".cb-thinking")) return;
+
+        var indicator = document.createElement("div");
+        indicator.className = "cb-thinking";
+        indicator.innerHTML = '<span class="cb-thinking-text">Thinking</span><span class="cb-thinking-dots"></span>';
+        messagesContainer.appendChild(indicator);
+
+        // Auto-scroll to show the indicator
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+        // Open the chat thread if it's closed
+        var thread = step.querySelector(".cb-chat-thread");
+        if (thread && !thread.classList.contains("open")) {
+            thread.classList.add("open");
+        }
+    }
+
+    function removeThinkingIndicators() {
+        var indicators = document.querySelectorAll(".cb-thinking");
+        for (var i = 0; i < indicators.length; i++) {
+            indicators[i].remove();
+        }
+    }
 
     // --- Toast ---
 

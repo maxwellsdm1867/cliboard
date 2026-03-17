@@ -470,7 +470,7 @@ fn handle_post_chat(mut request: tiny_http::Request, session_dir: &Path, ws_clie
                 return;
             }
 
-            // Broadcast chat update via WebSocket
+            // Broadcast chat update + thinking indicator via WebSocket
             eprintln!("[chat] POST /chat received: step={} text=\"{}\"", hook_step_id, &hook_text);
             if let Ok(store) = session.read_messages() {
                 eprintln!("[chat] Broadcasting user msg via WebSocket ({} total messages)", store.messages.len());
@@ -480,6 +480,13 @@ fn handle_post_chat(mut request: tiny_http::Request, session_dir: &Path, ws_clie
                 });
                 broadcast_to_ws_clients(ws_clients, &ws_json.to_string());
             }
+
+            // Immediately broadcast thinking indicator so the viewer shows feedback
+            let thinking_json = serde_json::json!({
+                "type": "chat_thinking",
+                "step_id": hook_step_id,
+            });
+            broadcast_to_ws_clients(ws_clients, &thinking_json.to_string());
 
             // Skip inline reply if an external board agent is handling replies
             let agent_pid_path = session_dir.join("agent.pid");
