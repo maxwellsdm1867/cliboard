@@ -60,8 +60,15 @@
                     showThinkingIndicator(data.step_id);
                 } else if (data.type === "chat_update") {
                     console.log("[ws] Received chat_update via WebSocket:", (data.messages || []).length, "messages");
+                    var prevMessages = chatMessages;
                     chatMessages = data.messages || [];
-                    removeThinkingIndicators();
+                    // Only remove thinking indicator when a new assistant message arrives
+                    // (not when the user's own message triggers a chat_update)
+                    var hadAssistant = prevMessages.filter(function(m) { return m.role === "assistant"; }).length;
+                    var hasAssistant = chatMessages.filter(function(m) { return m.role === "assistant"; }).length;
+                    if (hasAssistant > hadAssistant) {
+                        removeThinkingIndicators();
+                    }
                     renderChatMessages();
                     stopChatPoll(); // Got update via WS, stop polling
                 } else {
