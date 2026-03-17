@@ -2,24 +2,23 @@
 
 # CLIBOARD
 
-**Live math whiteboard for your terminal.**
+**Your terminal can't render math. cliboard fixes that.**
 
-Type LaTeX in the terminal, see publication-quality equations in the browser — with per-step AI chat built in.
-
-A plain markdown+LaTeX document format (`.cb.md`) paired with a display engine that renders interactive, physics-textbook-style math — all from a single Rust binary with zero runtime dependencies.
-
-No API calls. No cloud. No cost. Everything runs locally on your machine.
-
-Built for physicists, mathematicians, and AI agents who work in the terminal.
+When you're deriving equations in the terminal — whether by hand, with Claude Code, or any AI agent — you're staring at raw LaTeX like `\frac{\hbar^2}{2m}\nabla^2`. cliboard opens a live browser view that renders your math as a physics textbook, updating instantly as you type.
 
 ![cliboard demo — Hydrogen Atom derivation with AI chat reply](image.png)
+
+**Ask questions about any equation.** Click an equation, ask "what is this?", and get a textbook-style explanation with its own numbered sub-equations — like having a tutor built into your derivation.
+
+**Select any equation and send it to chat.** Highlight a term, hit "Send to terminal", and it lands in your chat input with full context — ready to ask about.
+
+No API keys. No cloud. No cost. One 2.3MB binary. Everything runs locally.
 
 [![Rust](https://img.shields.io/badge/Rust-1.70+-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/tests-237_passing-2ea44f)](#)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Binary](https://img.shields.io/badge/binary-2.3MB-8B5CF6)](#)
 [![KaTeX](https://img.shields.io/badge/KaTeX-server--side-329DAA?logo=latex&logoColor=white)](#)
-[![No JS Math](https://img.shields.io/badge/client_JS_math-0KB-green)](#)
 
 </div>
 
