@@ -1,4 +1,93 @@
-/* cliboard viewer — dark OLED theme */
+/* cliboard viewer — themed with CSS custom properties */
+
+/* ===== Theme definitions ===== */
+
+/* Dark theme (default) */
+:root, [data-theme="dark"] {
+    --bg: #1C1917;
+    --bg-card: #292524;
+    --border: #44403C;
+    --text: #FAFAF9;
+    --text-muted: #A8A29E;
+    --text-secondary: #D6D3D1;
+    --accent: #CA8A04;
+    --accent-hover: #EAB308;
+    --result-bg: rgba(202, 138, 4, 0.05);
+    --error-bg: #451A1A;
+    --error-border: #7F1D1D;
+    --error-text: #FCA5A5;
+    --toast-bg: #292524;
+    --toast-border: #44403C;
+    --toggle-bg: rgba(255, 255, 255, 0.06);
+    --toggle-hover: rgba(255, 255, 255, 0.12);
+    --toggle-active: rgba(202, 138, 4, 0.2);
+}
+
+/* Warm theme */
+[data-theme="warm"] {
+    --bg: #1A1412;
+    --bg-card: #2A1F1A;
+    --border: #4A3828;
+    --text: #F5E6D3;
+    --text-muted: #B89A7A;
+    --text-secondary: #D4B896;
+    --accent: #D4943A;
+    --accent-hover: #E8A94E;
+    --result-bg: rgba(212, 148, 58, 0.08);
+    --error-bg: #3A1818;
+    --error-border: #6B2020;
+    --error-text: #F0A0A0;
+    --toast-bg: #2A1F1A;
+    --toast-border: #4A3828;
+    --toggle-bg: rgba(255, 230, 200, 0.06);
+    --toggle-hover: rgba(255, 230, 200, 0.12);
+    --toggle-active: rgba(212, 148, 58, 0.2);
+}
+
+/* System theme — follows OS preference */
+[data-theme="system"] {
+    --bg: #1C1917;
+    --bg-card: #292524;
+    --border: #44403C;
+    --text: #FAFAF9;
+    --text-muted: #A8A29E;
+    --text-secondary: #D6D3D1;
+    --accent: #CA8A04;
+    --accent-hover: #EAB308;
+    --result-bg: rgba(202, 138, 4, 0.05);
+    --error-bg: #451A1A;
+    --error-border: #7F1D1D;
+    --error-text: #FCA5A5;
+    --toast-bg: #292524;
+    --toast-border: #44403C;
+    --toggle-bg: rgba(255, 255, 255, 0.06);
+    --toggle-hover: rgba(255, 255, 255, 0.12);
+    --toggle-active: rgba(202, 138, 4, 0.2);
+}
+
+@media (prefers-color-scheme: light) {
+    [data-theme="system"] {
+        --bg: #FAFAF9;
+        --bg-card: #FFFFFF;
+        --border: #D6D3D1;
+        --text: #1C1917;
+        --text-muted: #78716C;
+        --text-secondary: #44403C;
+        --accent: #B45309;
+        --accent-hover: #D97706;
+        --result-bg: rgba(180, 83, 9, 0.06);
+        --error-bg: #FEF2F2;
+        --error-border: #FECACA;
+        --error-text: #991B1B;
+        --toast-bg: #FFFFFF;
+        --toast-border: #D6D3D1;
+        --toggle-bg: rgba(0, 0, 0, 0.04);
+        --toggle-hover: rgba(0, 0, 0, 0.08);
+        --toggle-active: rgba(180, 83, 9, 0.12);
+    }
+}
+
+/* ===== Base ===== */
 
 * {
     box-sizing: border-box;
@@ -11,16 +100,18 @@ html {
 }
 
 body {
-    background: #1C1917;
-    color: #FAFAF9;
+    background: var(--bg);
+    color: var(--text);
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     line-height: 1.6;
     font-size: 1rem;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    transition: background 0.3s, color 0.3s;
 }
 
-/* Board layout */
+/* ===== Board layout ===== */
+
 #board {
     max-width: 720px;
     margin: 0 auto;
@@ -34,22 +125,23 @@ body {
     justify-content: space-between;
     padding-bottom: 1.5rem;
     margin-bottom: 2rem;
-    border-bottom: 1px solid #44403C;
+    border-bottom: 1px solid var(--border);
 }
 
 #board-title {
     font-size: 1.4rem;
     font-weight: 700;
-    color: #FAFAF9;
+    color: var(--text);
 }
 
 #step-count {
     font-size: 0.85rem;
-    color: #A8A29E;
+    color: var(--text-muted);
     white-space: nowrap;
 }
 
-/* Steps */
+/* ===== Steps ===== */
+
 .step {
     margin-bottom: 2.5rem;
 }
@@ -62,7 +154,7 @@ body {
 }
 
 .step-number {
-    color: #A8A29E;
+    color: var(--text-muted);
     font-size: 0.85rem;
     font-weight: 500;
 }
@@ -70,79 +162,116 @@ body {
 .step-title {
     font-size: 1.1rem;
     font-weight: 600;
-    color: #FAFAF9;
+    color: var(--text);
 }
 
-/* Equation cards */
+/* ===== Equation cards ===== */
+
 .equation-card {
-    background: #292524;
-    border: 1px solid #44403C;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 1.5rem;
     margin-bottom: 0.75rem;
-    overflow-x: auto;
+    display: flex;
+    align-items: center;
+    padding: 1rem 1rem;
+    transition: background 0.3s, border-color 0.3s;
+}
+
+.equation-content {
+    flex: 1;
     text-align: center;
+    overflow-x: auto;
+    padding: 0.5rem 0;
+}
+
+.equation-number {
+    flex-shrink: 0;
+    padding-left: 1rem;
+    font-family: KaTeX_Main, "Times New Roman", serif;
+    font-size: 1rem;
+    color: var(--text-muted);
+    user-select: none;
 }
 
 .equation-card .katex-display {
     margin: 0;
 }
 
-/* Notes / annotations */
+/* ===== Notes / annotations ===== */
+
 .note {
-    color: #A8A29E;
+    color: var(--text-muted);
     font-size: 0.9rem;
     font-style: italic;
     padding-left: 1rem;
-    border-left: 2px solid #44403C;
+    border-left: 2px solid var(--border);
+    padding-top: 0.4rem;
+    padding-bottom: 0.4rem;
+}
+
+.note:first-of-type {
     margin-top: 0.75rem;
+}
+
+.note:last-of-type {
     margin-bottom: 0.5rem;
 }
 
-/* Prose blocks */
+.note + .note {
+    border-top: none;
+    margin-top: 0;
+}
+
+/* ===== Prose blocks ===== */
+
 .prose {
-    color: #D6D3D1;
+    color: var(--text-secondary);
     margin-bottom: 2rem;
 }
 
-/* Section dividers */
+/* ===== Section dividers ===== */
+
 .divider {
     border: none;
-    border-top: 1px solid #44403C;
+    border-top: 1px solid var(--border);
     margin: 2.5rem 0;
 }
 
-/* Result boxes */
+/* ===== Result boxes ===== */
+
 .result {
-    border-left: 3px solid #CA8A04;
-    background: rgba(202, 138, 4, 0.05);
+    border-left: 3px solid var(--accent);
+    background: var(--result-bg);
     padding: 1.5rem;
     border-radius: 8px;
     margin-bottom: 2.5rem;
 }
 
 .result .step-title {
-    color: #EAB308;
+    color: var(--accent-hover);
 }
 
-/* Error cards */
+/* ===== Error cards ===== */
+
 .error-card {
-    background: #451A1A;
-    border: 1px solid #7F1D1D;
+    background: var(--error-bg);
+    border: 1px solid var(--error-border);
     border-radius: 8px;
     padding: 1rem;
     font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     font-size: 0.85rem;
-    color: #FCA5A5;
+    color: var(--error-text);
     overflow-x: auto;
     margin-bottom: 0.75rem;
 }
 
-/* Send-to-terminal button */
+/* ===== Send-to-terminal button ===== */
+
 #send-btn {
     position: fixed;
-    background: #CA8A04;
-    color: #1C1917;
+    background: var(--accent);
+    color: var(--bg);
     font-weight: 600;
     border-radius: 6px;
     padding: 0.5rem 1rem;
@@ -155,22 +284,23 @@ body {
 }
 
 #send-btn:hover {
-    background: #EAB308;
+    background: var(--accent-hover);
 }
 
 #send-btn.hidden {
     display: none;
 }
 
-/* Toast */
+/* ===== Toast ===== */
+
 #toast {
     position: fixed;
     bottom: 2rem;
     left: 50%;
     transform: translateX(-50%);
-    background: #292524;
-    border: 1px solid #44403C;
-    color: #FAFAF9;
+    background: var(--toast-bg);
+    border: 1px solid var(--toast-border);
+    color: var(--text);
     padding: 0.5rem 1.5rem;
     border-radius: 6px;
     font-size: 0.85rem;
@@ -184,7 +314,59 @@ body {
     display: none;
 }
 
-/* Fade-in animation for new steps */
+/* ===== Theme toggle ===== */
+
+#theme-toggle {
+    position: fixed;
+    right: 1rem;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: var(--toggle-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px;
+    z-index: 50;
+    transition: background 0.3s, border-color 0.3s;
+}
+
+#theme-toggle button {
+    width: 28px;
+    height: 28px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s;
+    padding: 0;
+}
+
+#theme-toggle button:hover {
+    background: var(--toggle-hover);
+}
+
+#theme-toggle button.active {
+    background: var(--toggle-active);
+}
+
+#theme-toggle button svg {
+    width: 16px;
+    height: 16px;
+    fill: var(--text-muted);
+    transition: fill 0.3s;
+}
+
+#theme-toggle button.active svg {
+    fill: var(--accent);
+}
+
+/* ===== Animations ===== */
+
 @keyframes fadeIn {
     from {
         opacity: 0;
@@ -204,9 +386,13 @@ body {
     .step.new {
         animation: none;
     }
+    body {
+        transition: none;
+    }
 }
 
-/* Responsive */
+/* ===== Responsive ===== */
+
 @media (max-width: 600px) {
     #board {
         padding: 1.25rem 1rem;
@@ -223,9 +409,14 @@ body {
     #board-title {
         font-size: 1.2rem;
     }
+
+    #theme-toggle {
+        right: 0.5rem;
+    }
 }
 
-/* KaTeX overrides for dark theme */
+/* ===== KaTeX color override ===== */
+
 .katex {
-    color: #FAFAF9;
+    color: var(--text);
 }

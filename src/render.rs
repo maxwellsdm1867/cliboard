@@ -105,8 +105,14 @@ fn process_inline_math(text: &str) -> String {
     result
 }
 
-/// Render a single block to HTML.
+/// Render a single block to HTML (used by tests that don't need equation numbers).
 fn render_block(block: &Block) -> String {
+    let mut eq_num: usize = 0;
+    render_block_numbered(block, &mut eq_num)
+}
+
+/// Render a single block to HTML with sequential equation numbering.
+fn render_block_numbered(block: &Block, eq_number: &mut usize) -> String {
     match block {
         Block::Step {
             id,
@@ -129,20 +135,22 @@ fn render_block(block: &Block) -> String {
                 data_latex
             );
 
-            // Step header
+            // Step header (titles support inline math via $...$)
             html.push_str(&format!(
                 "<div class=\"step-header\"><span class=\"step-number\">{}.</span><span class=\"step-title\">{}</span></div>",
                 id,
-                html_escape(title)
+                process_inline_math(title)
             ));
 
-            // Equations
+            // Equations with numbers
             for eq in equations {
+                *eq_number += 1;
                 match render_equation(eq) {
                     Ok(rendered) => {
-                        html.push_str("<div class=\"equation-card\">");
-                        html.push_str(&rendered);
-                        html.push_str("</div>");
+                        html.push_str(&format!(
+                            "<div class=\"equation-card\"><div class=\"equation-content\">{}</div><span class=\"equation-number\">({})</span></div>",
+                            rendered, eq_number
+                        ));
                     }
                     Err(err_msg) => {
                         html.push_str("<div class=\"equation-card error-card\">");
@@ -180,8 +188,9 @@ fn render_block(block: &Block) -> String {
 pub fn render_blocks_html(doc: &Document) -> String {
     // Pre-allocate: ~1KB per block is a reasonable estimate
     let mut html = String::with_capacity(doc.blocks.len() * 1024);
+    let mut eq_number: usize = 0;
     for block in &doc.blocks {
-        html.push_str(&render_block(block));
+        html.push_str(&render_block_numbered(block, &mut eq_number));
     }
     html
 }

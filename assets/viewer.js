@@ -1,4 +1,4 @@
-// cliboard viewer — polling, auto-scroll, selection, send-to-terminal
+// cliboard viewer — WebSocket updates with polling fallback, auto-scroll, selection, send-to-terminal
 
 (function () {
     "use strict";
@@ -8,6 +8,11 @@
     var userScrolledUp = false;
     var previousBlockCount = 0;
     var pollTimer = null;
+    var ws = null;
+    var wsPort = null;
+    var wsFailCount = 0;
+    var wsMaxRetries = 3;
+    var usingWebSocket = false;
 
     // --- DOM refs ---
     var boardTitle = document.getElementById("board-title");
@@ -16,7 +21,79 @@
     var sendBtn = document.getElementById("send-btn");
     var toast = document.getElementById("toast");
 
-    // --- Polling ---
+    // --- WebSocket ---
+
+    function connectWebSocket() {
+        if (!wsPort) return;
+        if (wsFailCount >= wsMaxRetries) {
+            // Too many failures, fall back to polling permanently
+            startPolling();
+            return;
+        }
+
+        var wsUrl = "ws://" + window.location.hostname + ":" + wsPort;
+        try {
+            ws = new WebSocket(wsUrl);
+        } catch (e) {
+            wsFailCount++;
+            startPolling();
+            return;
+        }
+
+        ws.onopen = function () {
+            wsFailCount = 0;
+            usingWebSocket = true;
+            // Stop polling since WebSocket is connected
+            stopPolling();
+        };
+
+        ws.onmessage = function (event) {
+            try {
+                var data = JSON.parse(event.data);
+                if (data.version > currentVersion) {
+                    update(data);
+                    currentVersion = data.version;
+                }
+            } catch (e) {
+                // Ignore malformed messages
+            }
+        };
+
+        ws.onclose = function () {
+            usingWebSocket = false;
+            ws = null;
+            wsFailCount++;
+            if (wsFailCount < wsMaxRetries) {
+                // Try to reconnect after a delay
+                setTimeout(connectWebSocket, 1000);
+            } else {
+                // Fall back to polling
+                startPolling();
+            }
+        };
+
+        ws.onerror = function () {
+            // onclose will fire after onerror, so let onclose handle reconnect
+            if (ws) {
+                ws.close();
+            }
+        };
+    }
+
+    // --- Polling (fallback) ---
+
+    function startPolling() {
+        if (!pollTimer) {
+            poll();
+        }
+    }
+
+    function stopPolling() {
+        if (pollTimer) {
+            clearTimeout(pollTimer);
+            pollTimer = null;
+        }
+    }
 
     async function poll() {
         try {
@@ -35,7 +112,15 @@
                 return;
             }
             var data = await res.json();
-            // data = { version, title, blocks_html }
+            // data = { version, title, blocks_html, ws_port }
+
+            // If we got a ws_port and haven't established WebSocket yet, try it
+            if (data.ws_port && !usingWebSocket && wsFailCount < wsMaxRetries) {
+                wsPort = data.ws_port;
+                connectWebSocket();
+                // Don't stop polling yet — WebSocket.onopen will stop it
+            }
+
             if (data.version > currentVersion) {
                 update(data);
                 currentVersion = data.version;
@@ -70,7 +155,7 @@
         // Don't replace DOM while user has an active selection (would destroy it)
         var sel = window.getSelection();
         if (sel && !sel.isCollapsed && getStepAncestor(sel.anchorNode)) {
-            // User is selecting — defer this update, it'll arrive on next poll
+            // User is selecting — defer this update, it'll arrive on next push/poll
             return;
         }
 
@@ -284,13 +369,44 @@
         }, 1500);
     }
 
+    // --- Theme toggle ---
+
+    function setTheme(theme) {
+        document.documentElement.setAttribute("data-theme", theme);
+        try { localStorage.setItem("cliboard-theme", theme); } catch (e) {}
+        // Update active state on buttons
+        var buttons = document.querySelectorAll("#theme-toggle button");
+        for (var i = 0; i < buttons.length; i++) {
+            if (buttons[i].getAttribute("data-theme") === theme) {
+                buttons[i].classList.add("active");
+            } else {
+                buttons[i].classList.remove("active");
+            }
+        }
+    }
+
+    function initTheme() {
+        var saved = null;
+        try { saved = localStorage.getItem("cliboard-theme"); } catch (e) {}
+        setTheme(saved || "dark");
+
+        var buttons = document.querySelectorAll("#theme-toggle button");
+        for (var i = 0; i < buttons.length; i++) {
+            buttons[i].addEventListener("click", function () {
+                setTheme(this.getAttribute("data-theme"));
+            });
+        }
+    }
+
     // --- Init ---
 
     document.addEventListener("DOMContentLoaded", function () {
         // Show toast as hidden but ready
         toast.classList.remove("hidden");
         toast.style.opacity = "0";
-        // Start polling
+        // Init theme
+        initTheme();
+        // Start with polling — it will discover ws_port and upgrade to WebSocket
         poll();
     });
 })();

@@ -16,8 +16,8 @@ DOCUMENT FORMAT (.cb.md)           Markdown + LaTeX with conventions
                     |
                     v
 DISPLAY ENGINE (viewer)            Physics textbook rendering + interaction
-  KaTeX server-side rendering, selection, send-to-terminal,
-  auto-scroll, error display, dark mode
+  KaTeX server-side rendering, equation numbers, selection,
+  send-to-terminal, auto-scroll, error display, dark mode
 ```
 
 The document format is the interface. Any tool that produces `.cb.md` gets the full display engine for free.
@@ -31,9 +31,9 @@ cargo install --path .
 # Start a derivation
 cliboard new "Hydrogen Atom Energy Levels"
 
-# Add steps (in a second terminal)
+# Add steps (in a second terminal, or from an agent)
 cliboard step "Schrodinger equation" "\hat{H}\psi = E\psi"
-cliboard note "Time-independent form"
+cliboard note 'Time-independent form: $\hat{H}$ is the Hamiltonian operator'
 cliboard result "Energy levels" "E_n = -\frac{13.6}{n^2}"
 
 # Export to a self-contained HTML file
@@ -60,6 +60,19 @@ cliboard export derivation.html
 | `selection` | Read what was last selected on the board | `cliboard selection --json` |
 
 All mutation commands (`step`, `eq`, `note`, `text`, `result`, `divider`) append to the `.cb.md` file and exit immediately. The display engine watches the file and re-renders automatically.
+
+## Inline Math
+
+Inline math is supported everywhere -- titles, notes, and prose blocks. Wrap LaTeX in `$...$`:
+
+```bash
+cliboard step 'Why scale by $\sqrt{d_k}$?' "\text{Var}(q \cdot k) = d_k"
+cliboard note 'When $d_k$ is large, softmax saturates. Dividing by $\sqrt{d_k}$ fixes this.'
+```
+
+## Equation Numbers
+
+Display equations are automatically numbered sequentially across the document, like a textbook. Numbers appear on the right side of each equation card in matching KaTeX font. No manual numbering needed.
 
 ## Document Format (.cb.md)
 
@@ -88,7 +101,7 @@ $$-\frac{\hbar^2}{2m}\nabla^2\psi + V(r)\psi = E\psi$$
 
 $$E_n = -\frac{13.6 \text{ eV}}{n^2}$$
 
-> The 1/n^2 dependence matches the Balmer series.
+> The $1/n^2$ dependence matches the Balmer series.
 ```
 
 | Syntax | Meaning |
@@ -96,8 +109,8 @@ $$E_n = -\frac{13.6 \text{ eV}}{n^2}$$
 | `---` (YAML) | Frontmatter with `title` and optional `theme` |
 | `## Title` | Numbered step |
 | `## Title {.result}` | Highlighted result box |
-| `$$...$$` | Display equation (KaTeX rendered) |
-| `$...$` | Inline math |
+| `$$...$$` | Display equation (KaTeX rendered, auto-numbered) |
+| `$...$` | Inline math (in titles, notes, and prose) |
 | `> text` | Annotation/note |
 | Plain paragraph | Unnumbered prose between steps |
 | `---` | Section divider |
@@ -106,23 +119,26 @@ You can write `.cb.md` files by hand or with any tool -- the display engine does
 
 ## Selection and Send-to-Terminal
 
-Click an equation on the board to select it. A "Send to terminal" button appears. Clicking it:
+Select text on the board. A floating "Send to terminal" button appears. Clicking it:
 
-1. Converts LaTeX to Unicode math for terminal readability (`\frac{e^2}{4\pi\epsilon_0 r}` becomes `e^2/4piepsilon_0r`)
-2. Copies the formatted result to your clipboard
-3. Writes full context to `~/.cliboard/selection.json` for agents to read programmatically
+1. Converts LaTeX to Unicode math via server-side conversion (`\frac{e^2}{4\pi\epsilon_0 r}` becomes `e²/4πε₀r`)
+2. Formats with context based on selection size:
+   - **Partial selection** (one symbol): `Ĥ in [Step 1] Ĥψ = Eψ`
+   - **Full equation**: `[Step 1] Ĥψ = Eψ`
+3. Copies to system clipboard
+4. Writes full context to `~/.cliboard/selection.json` for agents to read programmatically
 
 Paste into your terminal to reference equations while chatting with an agent:
 
 ```
-why does [Step 3] V(r) = -e^2/4piepsilon_0r imply separability?
+what is Ĥ in [Step 1] Ĥψ = Eψ
 ```
 
 Read the current selection programmatically:
 
 ```bash
-cliboard selection          # human-readable
-cliboard selection --json   # full JSON
+cliboard selection          # human-readable summary
+cliboard selection --json   # full JSON (step_id, title, latex, unicode, formatted)
 cliboard selection --latex  # raw LaTeX only
 ```
 
@@ -132,9 +148,9 @@ cliboard selection --latex  # raw LaTeX only
 
 - **Language**: Rust -- single binary, no runtime dependencies
 - **CLI**: `clap` with derive macros
-- **HTTP server**: `tiny_http` (synchronous, lightweight)
+- **HTTP server**: `tiny_http` (synchronous, localhost-only)
 - **Math rendering**: Server-side via `katex-rs` (no client-side JS for math)
-- **Markdown parsing**: `pulldown-cmark`
+- **Markdown parsing**: `pulldown-cmark` with math and heading attributes enabled
 - **Asset bundling**: `rust-embed` (KaTeX CSS + woff2 fonts compiled into the binary)
 - **File watching**: `notify` (cross-platform filesystem events)
 - **File locking**: `fs4` for concurrent write safety
@@ -147,7 +163,16 @@ cliboard selection --latex  # raw LaTeX only
 .cb.md --> parse markdown --> Document model --> katex-rs (LaTeX to HTML) --> serve HTML
 ```
 
-The viewer is vanilla HTML/CSS/JS with no framework dependencies (< 20KB excluding KaTeX assets). Client JS handles polling, DOM diffing, auto-scroll, and selection.
+**Server endpoints:**
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/` | GET | Viewer HTML |
+| `/board` | GET | JSON `{ version, title, blocks_html }` (supports `?v=N` for 304) |
+| `/katex/*` | GET | Embedded KaTeX CSS and fonts |
+| `/select` | POST | Receive selection, return unicode conversion |
+
+The viewer is vanilla HTML/CSS/JS with no framework dependencies (< 20KB excluding KaTeX assets). Client JS handles polling (500ms), DOM diffing, auto-scroll, and selection.
 
 ## Building from Source
 
@@ -157,7 +182,7 @@ cargo build --release
 
 The release profile is configured for minimum binary size: `opt-level = "z"`, `strip = true`, `lto = true`, `codegen-units = 1`, `panic = "abort"`.
 
-The resulting binary is self-contained -- KaTeX CSS and all 20 woff2 font files are embedded at compile time.
+The resulting binary (~2.3MB) is self-contained -- KaTeX CSS and all 20 woff2 font files are embedded at compile time.
 
 ## Session Storage
 

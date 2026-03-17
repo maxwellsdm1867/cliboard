@@ -1,5 +1,6 @@
 #[allow(unused_imports)]
 use std::io::Read as _;
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -7,6 +8,7 @@ use std::thread;
 
 use rust_embed::Embed;
 use tiny_http::{Header, Method, Response, Server, StatusCode};
+use tungstenite::WebSocket;
 
 use crate::parser;
 use crate::render;
@@ -25,9 +27,13 @@ struct RenderedState {
     blocks_html: String,
 }
 
+/// A list of connected WebSocket clients, protected by a mutex.
+type WsClients = Arc<Mutex<Vec<WebSocket<TcpStream>>>>;
+
 /// Start the HTTP server in the foreground (blocking).
 ///
 /// Serves the viewer, KaTeX assets, and the /board polling endpoint.
+/// Also starts a WebSocket server on port+1 for instant push updates.
 /// Watches the board file for changes and re-renders automatically.
 pub fn start_server(
     session: &Session,
@@ -46,14 +52,26 @@ pub fn start_server(
     let state = Arc::new(Mutex::new(state));
     let version = Arc::new(AtomicU64::new(1));
 
-    start_file_watcher(board_path, Arc::clone(&state), Arc::clone(&version));
+    // Start WebSocket server on port+1
+    let ws_port = find_available_port(port + 1)?;
+    let ws_clients: WsClients = Arc::new(Mutex::new(Vec::new()));
+
+    start_ws_server(ws_port, Arc::clone(&ws_clients));
+
+    start_file_watcher(
+        board_path,
+        Arc::clone(&state),
+        Arc::clone(&version),
+        Arc::clone(&ws_clients),
+    );
 
     let session_dir = session.dir.clone();
 
     eprintln!("cliboard server listening on http://localhost:{}", port);
+    eprintln!("cliboard WebSocket server on ws://localhost:{}", ws_port);
 
     for request in server.incoming_requests() {
-        handle_request(request, &state, &version, &session_dir);
+        handle_request(request, &state, &version, &session_dir, ws_port);
     }
 
     Ok(())
@@ -74,11 +92,12 @@ fn handle_request(
     state: &Arc<Mutex<RenderedState>>,
     version: &Arc<AtomicU64>,
     session_dir: &Path,
+    ws_port: u16,
 ) {
     let url = request.url().to_string();
 
     match request.method() {
-        Method::Get => handle_get(request, &url, state, version),
+        Method::Get => handle_get(request, &url, state, version, ws_port),
         Method::Post if url == "/select" => handle_select(request, session_dir),
         _ => respond_not_found(request),
     }
@@ -89,6 +108,7 @@ fn handle_get(
     url: &str,
     state: &Arc<Mutex<RenderedState>>,
     version: &Arc<AtomicU64>,
+    ws_port: u16,
 ) {
     match url {
         "/" => serve_embedded::<ViewerAssets>(request, "viewer.html", "text/html; charset=utf-8"),
@@ -97,7 +117,7 @@ fn handle_get(
             serve_embedded::<ViewerAssets>(request, "viewer.js", "application/javascript")
         }
         _ if url == "/board" || url.starts_with("/board?") => {
-            serve_board(request, url, state, version)
+            serve_board(request, url, state, version, ws_port)
         }
         "/katex/katex.min.css" => serve_embedded::<KatexAssets>(request, "katex.min.css", "text/css"),
         _ if url.starts_with("/katex/fonts/") => {
@@ -115,7 +135,7 @@ fn handle_get(
 /// Try to find an available port starting from `preferred`.
 pub fn find_available_port(preferred: u16) -> Result<u16, Box<dyn std::error::Error>> {
     for port in preferred..=preferred + 10 {
-        if std::net::TcpListener::bind(format!("127.0.0.1:{}", port)).is_ok() {
+        if TcpListener::bind(format!("127.0.0.1:{}", port)).is_ok() {
             return Ok(port);
         }
     }
@@ -145,13 +165,14 @@ fn serve_embedded<E: Embed>(request: tiny_http::Request, name: &str, content_typ
     }
 }
 
-/// Serve the /board endpoint: JSON with version, title, and pre-rendered blocks HTML.
+/// Serve the /board endpoint: JSON with version, title, pre-rendered blocks HTML, and ws_port.
 /// Supports `?v=<version>` query param -- returns 304 if the client is already up to date.
 fn serve_board(
     request: tiny_http::Request,
     url: &str,
     state: &Arc<Mutex<RenderedState>>,
     version: &Arc<AtomicU64>,
+    ws_port: u16,
 ) {
     let ver = version.load(Ordering::Relaxed);
 
@@ -173,6 +194,7 @@ fn serve_board(
         "version": ver,
         "title": title,
         "blocks_html": blocks_html,
+        "ws_port": ws_port,
     });
     let body = json.to_string();
     let header = Header::from_bytes("Content-Type", "application/json").unwrap();
@@ -273,11 +295,89 @@ fn handle_select(mut request: tiny_http::Request, session_dir: &Path) {
     }
 }
 
+/// Start the WebSocket server on a dedicated TCP port.
+/// Accepts incoming connections and adds them to the shared client list.
+fn start_ws_server(ws_port: u16, ws_clients: WsClients) {
+    let addr = format!("127.0.0.1:{}", ws_port);
+    let listener = match TcpListener::bind(&addr) {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Failed to bind WebSocket server to {}: {}", addr, e);
+            return;
+        }
+    };
+
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            match stream {
+                Ok(stream) => {
+                    let clients = Arc::clone(&ws_clients);
+                    thread::spawn(move || {
+                        handle_ws_connection(stream, clients);
+                    });
+                }
+                Err(e) => {
+                    eprintln!("WebSocket accept error: {}", e);
+                }
+            }
+        }
+    });
+}
+
+/// Handle a single WebSocket connection.
+/// Upgrades the TCP stream to a WebSocket, adds it to the client list,
+/// then reads (and discards) incoming messages to detect disconnection.
+fn handle_ws_connection(stream: TcpStream, clients: WsClients) {
+    // Set a read timeout so we can periodically check for disconnection
+    let _ = stream.set_nonblocking(false);
+
+    let ws = match tungstenite::accept(stream) {
+        Ok(ws) => ws,
+        Err(e) => {
+            eprintln!("WebSocket handshake failed: {}", e);
+            return;
+        }
+    };
+
+    // Add to client list
+    {
+        let mut list = clients.lock().unwrap();
+        list.push(ws);
+    }
+
+    // We don't need to read from the client in a loop here because:
+    // - The client list is used by the file watcher to broadcast
+    // - Disconnection is detected when broadcast fails (write returns error)
+    // - The WebSocket object is now owned by the clients Vec
+    //
+    // This thread's job is done after handshake + registration.
+}
+
+/// Broadcast a JSON message to all connected WebSocket clients.
+/// Removes disconnected clients from the list.
+fn broadcast_to_ws_clients(ws_clients: &WsClients, message: &str) {
+    let mut clients = ws_clients.lock().unwrap();
+
+    // Iterate backwards so we can remove by index without invalidating indices
+    let mut i = clients.len();
+    while i > 0 {
+        i -= 1;
+        let send_result =
+            clients[i].send(tungstenite::Message::Text(message.to_string()));
+        if send_result.is_err() {
+            // Client disconnected; remove it
+            clients.swap_remove(i);
+        }
+    }
+}
+
 /// Start a file watcher thread that re-parses and re-renders when the board file changes.
+/// On change, broadcasts the new state to all WebSocket clients.
 fn start_file_watcher(
     board_path: PathBuf,
     state: Arc<Mutex<RenderedState>>,
     version: Arc<AtomicU64>,
+    ws_clients: WsClients,
 ) {
     use notify::{EventKind, RecursiveMode, Watcher};
 
@@ -316,11 +416,22 @@ fn start_file_watcher(
                         if let Ok(content) = std::fs::read_to_string(&board_path) {
                             let doc = parser::parse(&content);
                             let blocks_html = render::render_blocks_html(&doc);
+
                             let mut st = state.lock().unwrap();
                             st.title = doc.title;
                             st.blocks_html = blocks_html;
+
+                            let new_ver = version.fetch_add(1, Ordering::Relaxed) + 1;
+
+                            // Build the JSON payload for WebSocket broadcast
+                            let json = serde_json::json!({
+                                "version": new_ver,
+                                "title": st.title,
+                                "blocks_html": st.blocks_html,
+                            });
                             drop(st);
-                            version.fetch_add(1, Ordering::Relaxed);
+
+                            broadcast_to_ws_clients(&ws_clients, &json.to_string());
                         }
                     }
                 }
