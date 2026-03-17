@@ -114,7 +114,11 @@ pub enum Command {
         json: bool,
     },
     /// Run as board agent: watch for chat questions and reply with full context
-    Agent,
+    Agent {
+        /// Model to use for replies (default: sonnet, options: haiku, sonnet, opus)
+        #[arg(long, default_value = "sonnet")]
+        model: String,
+    },
     /// Import a session from a JSON file and open the board
     Import {
         /// Path to the JSON file

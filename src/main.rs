@@ -52,7 +52,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         Command::Chat { all, step, json } => cmd_chat(all, step, json),
         Command::Reply { step_id, text } => cmd_reply(step_id, text),
         Command::Listen { json } => cmd_listen(json),
-        Command::Agent => cmd_agent(),
+        Command::Agent { model } => cmd_agent(&model),
         Command::Import { input } => cmd_import(&input),
         Command::Update { check } => cmd_update(check),
     }
@@ -668,7 +668,7 @@ fn cmd_listen(json: bool) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn cmd_agent() -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_agent(model: &str) -> Result<(), Box<dyn std::error::Error>> {
     use notify::{EventKind, RecursiveMode, Watcher};
     use std::collections::HashSet;
 
@@ -769,9 +769,9 @@ fn cmd_agent() -> Result<(), Box<dyn std::error::Error>> {
                                     &context,
                                 );
 
-                                eprintln!("[agent] Generating reply for step {}...", step_id);
+                                eprintln!("[agent] Generating reply for step {} (model: {})...", step_id, model);
                                 let output = std::process::Command::new("claude")
-                                    .args(["-p", &prompt])
+                                    .args(["-p", &prompt, "--model", model])
                                     .output();
 
                                 match output {
