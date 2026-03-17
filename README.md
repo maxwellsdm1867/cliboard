@@ -8,6 +8,8 @@ Type LaTeX in the terminal, see publication-quality equations in the browser —
 
 A plain markdown+LaTeX document format (`.cb.md`) paired with a display engine that renders interactive, physics-textbook-style math — all from a single Rust binary with zero runtime dependencies.
 
+No API calls. No cloud. No cost. Everything runs locally on your machine.
+
 Built for physicists, mathematicians, and AI agents who work in the terminal.
 
 ![cliboard demo — Hydrogen Atom derivation with AI chat reply](image.png)
