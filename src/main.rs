@@ -73,6 +73,9 @@ fn count_steps(content: &str) -> usize {
 fn cmd_new(title: &str) -> Result<(), Box<dyn std::error::Error>> {
     let session = Session::create(title)?;
 
+    // Clean up any stale agent.pid from previous sessions
+    session.remove_agent_pid();
+
     let port = server::find_available_port(8377)?;
     let url = format!("http://localhost:{}", port);
 
@@ -89,8 +92,6 @@ fn cmd_new(title: &str) -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(false);
 
     if has_claude {
-        let agent_board = session.board_path.clone();
-        let agent_dir = session.dir.clone();
         std::thread::Builder::new()
             .name("chat-agent".into())
             .spawn(move || {

@@ -765,7 +765,16 @@
             var started = thinkingSteps[stepId];
             if (started) {
                 var secs = Math.round((Date.now() - started) / 1000);
-                els[i].textContent = secs + "s";
+                if (secs > 45) {
+                    // Likely stuck — clear the indicator
+                    delete thinkingSteps[stepId];
+                    var thinkingEl = els[i].closest(".cb-thinking");
+                    if (thinkingEl) {
+                        thinkingEl.innerHTML = '<span class="cb-thinking-text" style="opacity:0.5">No response — agent may not be running</span>';
+                    }
+                } else {
+                    els[i].textContent = secs + "s";
+                }
             }
         }
     }
