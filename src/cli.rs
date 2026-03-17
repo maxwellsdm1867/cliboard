@@ -61,6 +61,15 @@ pub enum Command {
         #[arg(short, long, default_value = "8377")]
         port: u16,
     },
+    /// Stream .cb.md content from stdin to the board (real-time render)
+    Pipe {
+        /// Create a new session even if one already exists
+        #[arg(long)]
+        new: bool,
+        /// Title for auto-created session
+        #[arg(short, long)]
+        title: Option<String>,
+    },
     /// Stop the current session server
     Stop,
     /// Export the current board as self-contained HTML

@@ -44,6 +44,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         Command::Divider => cmd_divider(),
         Command::Render { latex, output } => cmd_render(&latex, output.as_deref()),
         Command::Serve { file, port } => cmd_serve(&file, port),
+        Command::Pipe { new, title } => cmd_pipe(new, title),
         Command::Stop => cmd_stop(),
         Command::Export { output } => cmd_export(&output),
         Command::Status => cmd_status(),
@@ -233,6 +234,184 @@ fn cmd_serve(file: &str, port: u16) -> Result<(), Box<dyn std::error::Error>> {
         port,
         session_dir: None,
     })?;
+    Ok(())
+}
+
+fn cmd_pipe(force_new: bool, title_override: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::{self, BufRead};
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    // --- Determine session ---
+    let (session, need_server) = if !force_new {
+        if let Some(s) = Session::find_current() {
+            if s.read_pid().map(is_pid_alive).unwrap_or(false) {
+                (s, false)
+            } else {
+                let title = title_override.unwrap_or_else(|| "Piped Content".into());
+                (Session::create(&title)?, true)
+            }
+        } else {
+            let title = title_override.unwrap_or_else(|| "Piped Content".into());
+            (Session::create(&title)?, true)
+        }
+    } else {
+        let title = title_override.unwrap_or_else(|| "Piped Content".into());
+        (Session::create(&title)?, true)
+    };
+
+    // --- Start server if needed ---
+    if need_server {
+        let srv_session = Session {
+            dir: session.dir.clone(),
+            board_path: session.board_path.clone(),
+        };
+        let port = server::find_available_port(8377)?;
+        let url = format!("http://localhost:{}", port);
+        let _ = open::that(&url);
+        eprintln!("Board live at {}", url);
+
+        std::thread::Builder::new()
+            .stack_size(16 * 1024 * 1024)
+            .name("pipe-server".into())
+            .spawn(move || {
+                let _ = server::start_server_for_session(&srv_session, port);
+            })?;
+        std::thread::sleep(Duration::from_millis(200));
+    }
+
+    eprintln!("[pipe] Streaming stdin to board... (Ctrl+C to stop)");
+
+    // --- Spawn reader thread for non-blocking reads ---
+    let (tx, rx) = mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        let stdin = io::stdin();
+        for line in stdin.lock().lines() {
+            match line {
+                Ok(l) => {
+                    if tx.send(l).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // --- Stream with aggressive flushing (100ms timeout) ---
+    let flush_timeout = Duration::from_millis(100);
+    let mut buffer = String::new();
+    let mut in_display_math = false;
+    let mut in_frontmatter = false;
+    let mut frontmatter_done = false;
+    let mut line_num = 0usize;
+
+    loop {
+        match rx.recv_timeout(flush_timeout) {
+            Ok(line) => {
+                line_num += 1;
+                let trimmed = line.trim();
+
+                // Handle frontmatter (skip when appending to existing session)
+                if line_num == 1 && trimmed == "---" {
+                    in_frontmatter = true;
+                    if need_server {
+                        // New session: frontmatter already written by Session::create
+                    }
+                    continue;
+                }
+                if in_frontmatter {
+                    if trimmed == "---" || trimmed == "..." {
+                        in_frontmatter = false;
+                        frontmatter_done = true;
+                    }
+                    continue;
+                }
+
+                // Block boundary: heading → flush before, then buffer heading
+                if trimmed.starts_with("## ") {
+                    if !buffer.is_empty() {
+                        session.append(&buffer)?;
+                        buffer.clear();
+                    }
+                    buffer.push_str(&line);
+                    buffer.push('\n');
+                    continue;
+                }
+
+                // Display math boundaries
+                if trimmed.starts_with("$$") && !in_display_math {
+                    if trimmed.ends_with("$$") && trimmed.len() > 4 {
+                        // Single-line $$equation$$
+                        buffer.push_str(&line);
+                        buffer.push('\n');
+                    } else {
+                        in_display_math = true;
+                        buffer.push_str(&line);
+                        buffer.push('\n');
+                    }
+                    continue;
+                }
+                if in_display_math {
+                    buffer.push_str(&line);
+                    buffer.push('\n');
+                    if trimmed.ends_with("$$") {
+                        in_display_math = false;
+                        // Equation complete → flush immediately
+                        session.append(&buffer)?;
+                        buffer.clear();
+                    }
+                    continue;
+                }
+
+                // Divider → flush
+                if trimmed == "---" && frontmatter_done {
+                    buffer.push_str(&line);
+                    buffer.push('\n');
+                    session.append(&buffer)?;
+                    buffer.clear();
+                    continue;
+                }
+
+                // Blank line → flush (paragraph boundary)
+                if trimmed.is_empty() {
+                    buffer.push('\n');
+                    session.append(&buffer)?;
+                    buffer.clear();
+                    continue;
+                }
+
+                // Regular content
+                buffer.push_str(&line);
+                buffer.push('\n');
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                // 100ms with no new input → flush whatever we have
+                if !buffer.is_empty() {
+                    session.append(&buffer)?;
+                    buffer.clear();
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                // EOF
+                if !buffer.is_empty() {
+                    session.append(&buffer)?;
+                }
+                break;
+            }
+        }
+    }
+
+    eprintln!("[pipe] Done.");
+
+    // If we started the server, keep it alive
+    if need_server {
+        eprintln!("[pipe] Server running. Press Ctrl+C to stop.");
+        loop {
+            std::thread::sleep(Duration::from_secs(60));
+        }
+    }
+
     Ok(())
 }
 
