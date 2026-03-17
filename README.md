@@ -10,6 +10,8 @@ When you're deriving equations — whether by hand, with Claude Code, or any AI 
 
 ![cliboard demo — Hydrogen Atom derivation with AI chat reply](image.png)
 
+**Built for AI-assisted math.** Tell Claude Code "derive the hydrogen atom energy levels" and it calls `cliboard step` — you see each equation render live in the browser as the agent works. No copy-pasting LaTeX into Overleaf. No squinting at `\frac{\hbar^2}{2m}` in your terminal. The agent writes, you read a textbook.
+
 **Ask questions about any equation.** Click an equation, ask "what is this?", and get a textbook-style explanation with its own numbered sub-equations — like having a tutor built into your derivation.
 
 **Select any equation and send it to chat.** Highlight a term, hit "Send to terminal", and it lands in your chat input with full context — ready to ask about.
