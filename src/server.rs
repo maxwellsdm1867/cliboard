@@ -491,7 +491,20 @@ fn handle_post_chat(mut request: tiny_http::Request, session_dir: &Path, ws_clie
                             Ok(out) if out.status.success() => {
                                 let reply = String::from_utf8_lossy(&out.stdout).trim().to_string();
                                 if !reply.is_empty() {
-                                    let rendered = crate::render::render_reply_content(&reply, step_id);
+                                    // Get equation context from existing replies
+                                    let session_for_ctx = Session {
+                                        dir: session_dir_owned.clone(),
+                                        board_path: board_path.clone(),
+                                    };
+                                    let existing_msgs = session_for_ctx
+                                        .read_messages()
+                                        .map(|s| s.messages)
+                                        .unwrap_or_default();
+                                    let (known_eqs, eq_offset) =
+                                        crate::render::reply_equation_context(&existing_msgs, step_id);
+                                    let rendered = crate::render::render_reply_content_ctx(
+                                        &reply, step_id, &known_eqs, eq_offset,
+                                    );
                                     let ts = std::time::SystemTime::now()
                                         .duration_since(std::time::UNIX_EPOCH)
                                         .unwrap_or_default()

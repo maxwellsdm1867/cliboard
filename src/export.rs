@@ -218,9 +218,13 @@ pub fn import_json(
         }
     }
 
-    // Reconstruct messages
+    // Reconstruct messages with context-aware equation numbering
     let mut messages = Vec::new();
     for step in &report.steps {
+        // Track equation context across replies within each step
+        let mut known_eqs = std::collections::HashMap::new();
+        let mut eq_offset = 0usize;
+
         for entry in &step.chat {
             let role = match entry.role.as_str() {
                 "assistant" => ChatRole::Assistant,
@@ -228,7 +232,27 @@ pub fn import_json(
             };
 
             let rendered = if role == ChatRole::Assistant {
-                render::render_reply_content(&entry.text, step.id)
+                let r = render::render_reply_content_ctx(
+                    &entry.text, step.id, &known_eqs, eq_offset,
+                );
+                // Update context for next reply
+                let ctx = render::reply_equation_context(
+                    &[ChatMessage {
+                        id: String::new(),
+                        step_id: step.id,
+                        role: ChatRole::Assistant,
+                        text: entry.text.clone(),
+                        rendered: String::new(),
+                        timestamp: String::new(),
+                        context: None,
+                    }],
+                    step.id,
+                );
+                for (k, v) in ctx.0 {
+                    known_eqs.entry(k).or_insert(v);
+                }
+                eq_offset = eq_offset.max(ctx.1);
+                r
             } else {
                 render::render_chat_text(&entry.text)
             };

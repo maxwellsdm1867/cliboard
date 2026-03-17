@@ -24,15 +24,28 @@ pub fn render_chat_text(text: &str) -> String {
 }
 
 /// Render reply content with display equations (sub-numbered) and inline math.
-///
-/// Splits on `$$...$$` delimiters:
-/// - Display equations → KaTeX display mode with sub-numbering `(step_id.1)`, `(step_id.2)`, ...
-/// - Prose between equations → inline math processed, wrapped in `<p class="reply-prose">`
+/// Simple version — starts numbering from 1. Use `render_reply_content_ctx` for
+/// context-aware numbering across multiple replies.
 pub fn render_reply_content(text: &str, step_id: usize) -> String {
+    render_reply_content_ctx(text, step_id, &std::collections::HashMap::new(), 0)
+}
+
+/// Render reply content with context-aware equation numbering.
+///
+/// - `known_eqs`: map of normalized LaTeX → existing equation number string (e.g., "1.2")
+///   for reusing numbers when the same equation appears again.
+/// - `eq_offset`: number of equations already assigned in previous replies for this step.
+///   New equations start at `eq_offset + 1`.
+pub fn render_reply_content_ctx(
+    text: &str,
+    step_id: usize,
+    known_eqs: &std::collections::HashMap<String, String>,
+    eq_offset: usize,
+) -> String {
     let mut result = String::with_capacity(text.len() * 2);
     result.push_str("<div class=\"reply-content\">");
 
-    let mut eq_sub = 0usize;
+    let mut next_sub = eq_offset;
     let mut rest = text;
 
     loop {
@@ -52,19 +65,26 @@ pub fn render_reply_content(text: &str, step_id: usize) -> String {
                 match after_open.find("$$") {
                     Some(end) => {
                         let latex = after_open[..end].trim();
-                        eq_sub += 1;
 
                         if latex.is_empty() {
-                            // Empty equation, skip
                             rest = &after_open[end + 2..];
                             continue;
                         }
 
+                        // Check if this equation already has a number
+                        let normalized = normalize_latex(latex);
+                        let eq_num = if let Some(existing) = known_eqs.get(&normalized) {
+                            existing.clone()
+                        } else {
+                            next_sub += 1;
+                            format!("{}.{}", step_id, next_sub)
+                        };
+
                         match render_equation(latex) {
                             Ok(rendered) => {
                                 result.push_str(&format!(
-                                    "<div class=\"equation-card reply-equation\" data-latex=\"{}\" data-eq-num=\"{}.{}\"><div class=\"equation-content\">{}</div><span class=\"equation-number\">({}.{})</span></div>",
-                                    html_escape(latex), step_id, eq_sub, rendered, step_id, eq_sub
+                                    "<div class=\"equation-card reply-equation\" data-latex=\"{}\" data-eq-num=\"{}\"><div class=\"equation-content\">{}</div><span class=\"equation-number\">({})</span></div>",
+                                    html_escape(latex), eq_num, rendered, eq_num
                                 ));
                             }
                             Err(err_msg) => {
@@ -80,7 +100,6 @@ pub fn render_reply_content(text: &str, step_id: usize) -> String {
                         rest = &after_open[end + 2..];
                     }
                     None => {
-                        // Unclosed $$, treat rest as prose
                         let remaining = rest.trim();
                         if !remaining.is_empty() {
                             result.push_str("<p class=\"reply-prose\">");
@@ -92,7 +111,6 @@ pub fn render_reply_content(text: &str, step_id: usize) -> String {
                 }
             }
             None => {
-                // No more equations, remaining is prose
                 let remaining = rest.trim();
                 if !remaining.is_empty() {
                     result.push_str("<p class=\"reply-prose\">");
@@ -106,6 +124,53 @@ pub fn render_reply_content(text: &str, step_id: usize) -> String {
 
     result.push_str("</div>");
     result
+}
+
+/// Normalize LaTeX for comparison: collapse whitespace, trim.
+fn normalize_latex(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Extract equation context from existing reply messages for a step.
+/// Returns (known_eqs map, next offset) for use with `render_reply_content_ctx`.
+pub fn reply_equation_context(
+    messages: &[crate::session::ChatMessage],
+    step_id: usize,
+) -> (std::collections::HashMap<String, String>, usize) {
+    let mut known = std::collections::HashMap::new();
+    let mut max_sub = 0usize;
+
+    for msg in messages {
+        if msg.step_id != step_id || msg.role != crate::session::ChatRole::Assistant {
+            continue;
+        }
+        // Extract $$...$$ equations and their assigned numbers from this reply
+        let mut rest = msg.text.as_str();
+        loop {
+            match rest.find("$$") {
+                Some(start) => {
+                    let after = &rest[start + 2..];
+                    match after.find("$$") {
+                        Some(end) => {
+                            let latex = after[..end].trim();
+                            if !latex.is_empty() {
+                                let normalized = normalize_latex(latex);
+                                if !known.contains_key(&normalized) {
+                                    max_sub += 1;
+                                    known.insert(normalized, format!("{}.{}", step_id, max_sub));
+                                }
+                            }
+                            rest = &after[end + 2..];
+                        }
+                        None => break,
+                    }
+                }
+                None => break,
+            }
+        }
+    }
+
+    (known, max_sub)
 }
 
 /// HTML-escape a string for use in attributes.

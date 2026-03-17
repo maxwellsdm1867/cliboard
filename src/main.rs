@@ -325,7 +325,9 @@ fn cmd_chat(all: bool, step: Option<usize>, json: bool) -> Result<(), Box<dyn st
 
 fn cmd_reply(step_id: usize, text: String) -> Result<(), Box<dyn std::error::Error>> {
     let session = require_session()?;
-    let rendered = render::render_reply_content(&text, step_id);
+    let existing = session.read_messages().map(|s| s.messages).unwrap_or_default();
+    let (known_eqs, eq_offset) = render::reply_equation_context(&existing, step_id);
+    let rendered = render::render_reply_content_ctx(&text, step_id, &known_eqs, eq_offset);
     let timestamp_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
         .as_millis();
