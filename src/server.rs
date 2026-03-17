@@ -484,7 +484,7 @@ fn handle_post_chat(mut request: tiny_http::Request, session_dir: &Path, ws_clie
                         );
 
                         let output = std::process::Command::new("claude")
-                            .args(["--print", "--prompt", &prompt])
+                            .args(["-p", &prompt])
                             .output();
 
                         match output {
