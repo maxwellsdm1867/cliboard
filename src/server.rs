@@ -362,7 +362,22 @@ fn handle_post_chat(mut request: tiny_http::Request, session_dir: &Path, ws_clie
 
     match serde_json::from_str::<ChatRequest>(&body) {
         Ok(chat_req) => {
-            let rendered = crate::render::render_chat_text(&chat_req.text);
+            // Validate
+            let text = chat_req.text.trim().to_string();
+            if text.is_empty() {
+                let resp = Response::from_string("Message cannot be empty")
+                    .with_status_code(StatusCode(400));
+                let _ = request.respond(resp);
+                return;
+            }
+            if text.len() > 4096 {
+                let resp = Response::from_string("Message too long")
+                    .with_status_code(StatusCode(400));
+                let _ = request.respond(resp);
+                return;
+            }
+
+            let rendered = crate::render::render_chat_text(&text);
             let timestamp_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -370,14 +385,14 @@ fn handle_post_chat(mut request: tiny_http::Request, session_dir: &Path, ws_clie
 
             // Capture values for the reply hook before msg is moved
             let hook_step_id = chat_req.step_id;
-            let hook_text = chat_req.text.clone();
+            let hook_text = text.clone();
             let hook_context = chat_req.context.clone();
 
             let msg = ChatMessage {
                 id: format!("{:x}", timestamp_ms),
                 step_id: chat_req.step_id,
                 role: ChatRole::User,
-                text: chat_req.text,
+                text,
                 rendered,
                 timestamp: chrono::Local::now().to_rfc3339(),
                 context: chat_req.context,

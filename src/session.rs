@@ -175,31 +175,40 @@ impl Session {
     /// Append a message to messages.json atomically with file locking.
     pub fn append_message(&self, msg: ChatMessage) -> std::io::Result<()> {
         use fs4::fs_std::FileExt;
+        use std::io::{Read, Seek, SeekFrom, Write};
 
         let path = self.messages_path();
 
-        // Create the file if it doesn't exist so we can lock it
-        if !path.exists() {
-            fs::write(&path, r#"{"messages":[]}"#)?;
-        }
+        // Open or create, then lock (no TOCTOU race)
+        let mut file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&path)?;
 
-        let lock_file = fs::OpenOptions::new().read(true).open(&path)?;
-        lock_file.lock_exclusive()?;
+        file.lock_exclusive()?;
 
-        let mut store: ChatStore = {
-            let data = fs::read_to_string(&path)?;
-            serde_json::from_str(&data).unwrap_or_default()
+        // Read current contents while holding lock
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+
+        let mut store: ChatStore = if contents.is_empty() {
+            ChatStore::default()
+        } else {
+            serde_json::from_str(&contents).unwrap_or_default()
         };
+
         store.messages.push(msg);
 
         let json = serde_json::to_string_pretty(&store).map_err(std::io::Error::other)?;
 
-        // Atomic write: write to temp file, then rename
-        let tmp_path = path.with_extension("json.tmp");
-        fs::write(&tmp_path, &json)?;
-        fs::rename(&tmp_path, &path)?;
+        // Truncate and rewrite while holding lock
+        file.seek(SeekFrom::Start(0))?;
+        file.set_len(0)?;
+        file.write_all(json.as_bytes())?;
+        file.flush()?;
 
-        lock_file.unlock()?;
+        file.unlock()?;
         Ok(())
     }
 

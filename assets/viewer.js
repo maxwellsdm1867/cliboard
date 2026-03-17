@@ -504,7 +504,7 @@
                     : "";
                 return '<div class="cb-chat-msg ' + escapeHtml(m.role) + '">' +
                     contextHtml +
-                    '<div>' + (m.rendered || escapeHtml(m.text)) + '</div>' +
+                    '<div>' + escapeHtml(m.text) + '</div>' +
                     '<div class="cb-chat-time">' + new Date(m.timestamp).toLocaleTimeString() + '</div>' +
                     '</div>';
             }).join("");
