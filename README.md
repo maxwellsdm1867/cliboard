@@ -2,9 +2,11 @@
 
 # CLIBOARD
 
-**Your terminal can't render math. cliboard fixes that.**
+**A visual CLI — terminal speed, textbook rendering.**
 
-When you're deriving equations in the terminal — whether by hand, with Claude Code, or any AI agent — you're staring at raw LaTeX like `\frac{\hbar^2}{2m}\nabla^2`. cliboard opens a live browser view that renders your math as a physics textbook, updating instantly as you type.
+CLI tools have been text-only for decades. cliboard is a new kind of tool: you type in the terminal, and a live browser view renders your work as a physics textbook — updating instantly, with interactive features no terminal can offer.
+
+When you're deriving equations — whether by hand, with Claude Code, or any AI agent — you're staring at raw LaTeX like `\frac{\hbar^2}{2m}\nabla^2`. cliboard turns that into publication-quality math you can read, select, and ask questions about.
 
 ![cliboard demo — Hydrogen Atom derivation with AI chat reply](image.png)
 
