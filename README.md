@@ -10,6 +10,8 @@ A plain markdown+LaTeX document format (`.cb.md`) paired with a display engine t
 
 Built for physicists, mathematicians, and AI agents who work in the terminal.
 
+![cliboard demo — Hydrogen Atom derivation with AI chat reply](image.png)
+
 [![Rust](https://img.shields.io/badge/Rust-1.70+-f74c00?logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/tests-237_passing-2ea44f)](#)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
