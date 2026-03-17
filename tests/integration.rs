@@ -253,6 +253,168 @@ fn test_parse_render_preserves_latex_in_data_attr() {
     assert!(html.contains("data-latex=\"E = mc^2\""));
 }
 
+// ---------------------------------------------------------------------------
+// Chat pipeline tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_chat_message_roundtrip() {
+    use cliboard::document::{ChatMessage, ChatRole, ChatContext, ChatStore};
+
+    let dir = tempfile::tempdir().unwrap();
+    let board_path = dir.path().join("board.cb.md");
+    std::fs::write(&board_path, "---\ntitle: Test\n---\n\n## Step 1\n\n$$E = mc^2$$\n").unwrap();
+
+    let session = cliboard::session::Session {
+        dir: dir.path().to_path_buf(),
+        board_path: board_path.clone(),
+    };
+
+    // Post a user message
+    let user_msg = ChatMessage {
+        id: "test-user-1".to_string(),
+        step_id: 1,
+        role: ChatRole::User,
+        text: "What is E?".to_string(),
+        rendered: "What is E?".to_string(),
+        timestamp: "2026-03-17T00:00:00".to_string(),
+        context: Some(ChatContext {
+            selected: Some("E".to_string()),
+            latex: Some("E".to_string()),
+            step_title: Some("Step 1".to_string()),
+        }),
+    };
+    session.append_message(user_msg).unwrap();
+
+    // Verify it's pending
+    let pending = session.pending_messages().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].text, "What is E?");
+    assert_eq!(pending[0].step_id, 1);
+
+    // Post an assistant reply
+    let reply_text = "In $E = mc^2$, $E$ represents energy.";
+    let (known_eqs, eq_offset) = render::reply_equation_context(
+        &session.read_messages().unwrap().messages, 1,
+    );
+    let rendered = render::render_reply_content_ctx(reply_text, 1, &known_eqs, eq_offset);
+
+    let reply_msg = ChatMessage {
+        id: "test-reply-1".to_string(),
+        step_id: 1,
+        role: ChatRole::Assistant,
+        text: reply_text.to_string(),
+        rendered,
+        timestamp: "2026-03-17T00:00:01".to_string(),
+        context: None,
+    };
+    session.append_message(reply_msg).unwrap();
+
+    // Verify no pending questions now
+    let pending = session.pending_messages().unwrap();
+    assert!(pending.is_empty());
+
+    // Verify full conversation
+    let store = session.read_messages().unwrap();
+    assert_eq!(store.messages.len(), 2);
+    assert_eq!(store.messages[0].role, ChatRole::User);
+    assert_eq!(store.messages[1].role, ChatRole::Assistant);
+    assert!(store.messages[1].rendered.contains("katex"));
+}
+
+#[test]
+fn test_chat_multi_turn_context() {
+    use cliboard::document::{ChatMessage, ChatRole, ChatStore};
+
+    let dir = tempfile::tempdir().unwrap();
+    let board_path = dir.path().join("board.cb.md");
+    std::fs::write(&board_path, "---\ntitle: T\n---\n\n## Step 1\n\n$$x = 1$$\n").unwrap();
+
+    let session = cliboard::session::Session {
+        dir: dir.path().to_path_buf(),
+        board_path,
+    };
+
+    // Q1
+    session.append_message(ChatMessage {
+        id: "q1".into(), step_id: 1, role: ChatRole::User,
+        text: "What is x?".into(), rendered: String::new(),
+        timestamp: String::new(), context: None,
+    }).unwrap();
+
+    // A1
+    session.append_message(ChatMessage {
+        id: "a1".into(), step_id: 1, role: ChatRole::Assistant,
+        text: "x is 1".into(), rendered: String::new(),
+        timestamp: String::new(), context: None,
+    }).unwrap();
+
+    // Q2 (follow-up)
+    session.append_message(ChatMessage {
+        id: "q2".into(), step_id: 1, role: ChatRole::User,
+        text: "But why?".into(), rendered: String::new(),
+        timestamp: String::new(), context: None,
+    }).unwrap();
+
+    // Verify conversation history for step 1
+    let msgs = session.messages_for_step(1).unwrap();
+    assert_eq!(msgs.len(), 3);
+
+    // Verify pending shows the follow-up
+    let pending = session.pending_messages().unwrap();
+    assert_eq!(pending.len(), 3); // all messages from step 1 (for context)
+    assert_eq!(pending.last().unwrap().text, "But why?");
+}
+
+#[test]
+fn test_agent_pid_lifecycle() {
+    let dir = tempfile::tempdir().unwrap();
+    let session = cliboard::session::Session {
+        dir: dir.path().to_path_buf(),
+        board_path: dir.path().join("board.cb.md"),
+    };
+
+    // No agent initially
+    assert!(!session.is_agent_running());
+    assert!(session.read_agent_pid().is_none());
+
+    // Write agent PID
+    session.write_agent_pid(std::process::id()).unwrap();
+    assert_eq!(session.read_agent_pid(), Some(std::process::id()));
+
+    // Current process is alive
+    assert!(session.is_agent_running());
+
+    // Remove agent PID
+    session.remove_agent_pid();
+    assert!(!session.is_agent_running());
+}
+
+#[test]
+fn test_reply_equation_numbering() {
+    use cliboard::document::{ChatMessage, ChatRole};
+
+    // Simulate existing replies with equations
+    let msgs = vec![
+        ChatMessage {
+            id: "a1".into(), step_id: 1, role: ChatRole::Assistant,
+            text: "First: $$E = mc^2$$ and $$F = ma$$".into(),
+            rendered: String::new(), timestamp: String::new(), context: None,
+        },
+    ];
+
+    let (known_eqs, offset) = render::reply_equation_context(&msgs, 1);
+
+    // Should have 2 known equations from the first reply
+    assert_eq!(offset, 2);
+    assert!(known_eqs.contains_key("E = mc^2"));
+    assert!(known_eqs.contains_key("F = ma"));
+
+    // New reply should start numbering at 1.3
+    let html = render::render_reply_content_ctx("New: $$a + b = c$$", 1, &known_eqs, offset);
+    assert!(html.contains("(1.3)"));
+}
+
 // Test KaTeX rendering from a thread simulating the file watcher
 #[test]
 fn test_katex_rendering_from_spawned_thread() {
