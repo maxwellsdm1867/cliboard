@@ -644,11 +644,17 @@ fn start_file_watcher(
 
     let watch_path = board_path.clone();
 
-    // KaTeX's JS engine needs more stack space than the default 2MB
+    // KaTeX's JS engine (QuickJS) has a 256KB internal stack limit measured
+    // from where JS_NewRuntime is called. We use a large thread stack and
+    // pre-warm the KaTeX thread_local at the shallowest stack depth.
     thread::Builder::new()
         .stack_size(8 * 1024 * 1024)
         .name("file-watcher".into())
         .spawn(move || {
+        // Pre-warm: initialize KaTeX's thread_local JS context at a shallow
+        // stack depth, giving QuickJS maximum room for its 256KB stack limit.
+        let _ = render::render_equation("x");
+
         let (tx, rx) = std::sync::mpsc::channel();
 
         let mut watcher = match notify::recommended_watcher(tx) {

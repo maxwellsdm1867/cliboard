@@ -252,3 +252,39 @@ fn test_parse_render_preserves_latex_in_data_attr() {
 
     assert!(html.contains("data-latex=\"E = mc^2\""));
 }
+
+// Test KaTeX rendering from a thread simulating the file watcher
+#[test]
+fn test_katex_rendering_from_spawned_thread() {
+    let handle = std::thread::Builder::new()
+        .stack_size(8 * 1024 * 1024)
+        .name("test-watcher".into())
+        .spawn(|| {
+            let input = r#"---
+title: Test
+---
+
+## Schrödinger Equation
+
+$$\hat{H}\psi = E\psi$$
+
+> Time-independent form
+
+## Expand the Hamiltonian
+
+$$-\frac{\hbar^2}{2m}\nabla^2\psi + V(r)\psi = E\psi$$
+
+## Energy Levels {.result}
+
+$$E_n = -\frac{13.6 \text{ eV}}{n^2}$$
+"#;
+            let doc = parser::parse(input);
+            let html = render::render_blocks_html(&doc);
+            // Should render successfully (no error cards)
+            assert!(!html.contains("error-card"), "KaTeX rendering failed in spawned thread: {}", 
+                html.chars().take(500).collect::<String>());
+            assert!(html.contains("katex-display"), "Missing katex-display in output");
+        })
+        .unwrap();
+    handle.join().unwrap();
+}

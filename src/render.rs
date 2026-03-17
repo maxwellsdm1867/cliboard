@@ -1,9 +1,14 @@
 use crate::document::{Block, Document, Theme};
 
 /// Render a single LaTeX equation to HTML using KaTeX (display mode).
+///
+/// Uses HTML-only output (no MathML) to stay within QuickJS's 256KB internal
+/// stack limit. MathML generation is deeply recursive and unnecessary for our
+/// browser-based viewer.
 pub fn render_equation(latex: &str) -> Result<String, String> {
     let opts = katex::Opts::builder()
         .display_mode(true)
+        .output_type(katex::OutputType::Html)
         .build()
         .unwrap();
     katex::render_with_opts(latex, opts).map_err(|e| e.to_string())
@@ -13,6 +18,7 @@ pub fn render_equation(latex: &str) -> Result<String, String> {
 pub fn render_inline_math(latex: &str) -> Result<String, String> {
     let opts = katex::Opts::builder()
         .display_mode(false)
+        .output_type(katex::OutputType::Html)
         .build()
         .unwrap();
     katex::render_with_opts(latex, opts).map_err(|e| e.to_string())

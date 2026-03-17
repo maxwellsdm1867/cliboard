@@ -12,9 +12,9 @@ use cli::{Cli, Command};
 use session::{ChatMessage, ChatRole, Session};
 
 fn main() {
-    // KaTeX's embedded JS engine (QuickJS) needs more stack than the
-    // default thread/main-thread size, especially in debug builds.
-    // Run everything in a thread with 16MB stack.
+    // KaTeX's embedded JS engine (QuickJS) has a 256KB internal stack limit.
+    // Use a large thread stack as defense-in-depth alongside the HTML-only
+    // KaTeX output mode (the primary fix in render.rs).
     let builder = std::thread::Builder::new()
         .stack_size(16 * 1024 * 1024)
         .name("cliboard-main".into());
