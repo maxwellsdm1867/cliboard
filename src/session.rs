@@ -125,6 +125,44 @@ impl Session {
             .ok()
     }
 
+    /// Path to the agent PID file.
+    pub fn agent_pid_path(&self) -> PathBuf {
+        self.dir.join("agent.pid")
+    }
+
+    /// Write the agent PID.
+    pub fn write_agent_pid(&self, pid: u32) -> std::io::Result<()> {
+        fs::write(self.agent_pid_path(), pid.to_string())
+    }
+
+    /// Read the agent PID.
+    pub fn read_agent_pid(&self) -> Option<u32> {
+        fs::read_to_string(self.agent_pid_path())
+            .ok()?
+            .trim()
+            .parse()
+            .ok()
+    }
+
+    /// Remove the agent PID file.
+    pub fn remove_agent_pid(&self) {
+        let _ = fs::remove_file(self.agent_pid_path());
+    }
+
+    /// Check if an external agent is running for this session.
+    pub fn is_agent_running(&self) -> bool {
+        if let Some(pid) = self.read_agent_pid() {
+            // Check if the process is still alive
+            std::process::Command::new("kill")
+                .args(["-0", &pid.to_string()])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        } else {
+            false
+        }
+    }
+
     /// Path to the messages.json file.
     pub fn messages_path(&self) -> PathBuf {
         self.dir.join("messages.json")
@@ -407,5 +445,23 @@ mod tests {
         assert!(content.contains("## Step 1"));
         assert!(content.contains("## Step 2"));
         assert!(content.contains("## Step 3"));
+    }
+
+    #[test]
+    fn test_agent_pid_write_read_remove() {
+        let tmp = tempfile::tempdir().unwrap();
+        let session = Session {
+            dir: tmp.path().to_path_buf(),
+            board_path: tmp.path().join("board.cb.md"),
+        };
+
+        assert!(session.read_agent_pid().is_none());
+        assert!(!session.is_agent_running());
+
+        session.write_agent_pid(99999).unwrap();
+        assert_eq!(session.read_agent_pid(), Some(99999));
+
+        session.remove_agent_pid();
+        assert!(session.read_agent_pid().is_none());
     }
 }

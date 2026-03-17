@@ -481,111 +481,130 @@ fn handle_post_chat(mut request: tiny_http::Request, session_dir: &Path, ws_clie
                 broadcast_to_ws_clients(ws_clients, &ws_json.to_string());
             }
 
-            // Fire reply hook: CLIBOARD_REPLY_HOOK env var, or auto-detect claude CLI
-            let hook = std::env::var("CLIBOARD_REPLY_HOOK").ok();
-            let use_claude = hook.is_none()
-                && std::process::Command::new("which")
-                    .arg("claude")
-                    .output()
-                    .map(|o| o.status.success())
-                    .unwrap_or(false);
+            // Skip inline reply if an external board agent is handling replies
+            let agent_pid_path = session_dir.join("agent.pid");
+            let agent_running = std::fs::read_to_string(&agent_pid_path)
+                .ok()
+                .and_then(|s| s.trim().parse::<u32>().ok())
+                .map(|pid| {
+                    std::process::Command::new("kill")
+                        .args(["-0", &pid.to_string()])
+                        .status()
+                        .map(|s| s.success())
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
 
-            if hook.is_some() || use_claude {
-                let step_id = hook_step_id;
-                let text = hook_text;
-                let context_json = serde_json::to_string(&hook_context).unwrap_or_default();
-                let session_dir_owned = session_dir.to_path_buf();
+            if !agent_running {
+                // Fire reply hook: CLIBOARD_REPLY_HOOK env var, or auto-detect claude CLI
+                let hook = std::env::var("CLIBOARD_REPLY_HOOK").ok();
+                let use_claude = hook.is_none()
+                    && std::process::Command::new("which")
+                        .arg("claude")
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
 
-                if let Some(hook_cmd) = hook {
-                    eprintln!("[chat] Firing reply hook: {}", &hook_cmd);
-                    thread::spawn(move || {
-                        let status = std::process::Command::new("sh")
-                            .arg("-c")
-                            .arg(&hook_cmd)
-                            .env("CLIBOARD_STEP_ID", step_id.to_string())
-                            .env("CLIBOARD_QUESTION", &text)
-                            .env("CLIBOARD_CONTEXT", &context_json)
-                            .status();
-                        match &status {
-                            Ok(s) => eprintln!("[chat] Reply hook exited: {}", s),
-                            Err(e) => eprintln!("[chat] Reply hook failed: {}", e),
-                        }
-                    });
-                } else {
-                    // Default: use claude CLI
-                    eprintln!("[chat] Auto-replying with claude CLI for step {}", step_id);
-                    thread::Builder::new()
-                        .stack_size(8 * 1024 * 1024)
-                        .name("claude-reply".into())
-                        .spawn(move || {
-                        // Read board for context
-                        let board_path = session_dir_owned.join("board.cb.md");
-                        let board = std::fs::read_to_string(&board_path).unwrap_or_default();
+                if hook.is_some() || use_claude {
+                    let step_id = hook_step_id;
+                    let text = hook_text;
+                    let context_json = serde_json::to_string(&hook_context).unwrap_or_default();
+                    let session_dir_owned = session_dir.to_path_buf();
 
-                        let prompt = format!(
-                            "You are answering a question about a math derivation. \
-                             Use LaTeX: $$...$$ for display equations, $...$ for inline math. \
-                             Be concise and precise.\n\n\
-                             Derivation:\n{}\n\n\
-                             Question about step {}: {}",
-                            board, step_id, text
-                        );
+                    if let Some(hook_cmd) = hook {
+                        eprintln!("[chat] Firing reply hook: {}", &hook_cmd);
+                        thread::spawn(move || {
+                            let status = std::process::Command::new("sh")
+                                .arg("-c")
+                                .arg(&hook_cmd)
+                                .env("CLIBOARD_STEP_ID", step_id.to_string())
+                                .env("CLIBOARD_QUESTION", &text)
+                                .env("CLIBOARD_CONTEXT", &context_json)
+                                .status();
+                            match &status {
+                                Ok(s) => eprintln!("[chat] Reply hook exited: {}", s),
+                                Err(e) => eprintln!("[chat] Reply hook failed: {}", e),
+                            }
+                        });
+                    } else {
+                        // Default: use claude CLI
+                        eprintln!("[chat] Auto-replying with claude CLI for step {}", step_id);
+                        thread::Builder::new()
+                            .stack_size(8 * 1024 * 1024)
+                            .name("claude-reply".into())
+                            .spawn(move || {
+                            // Read board for context
+                            let board_path = session_dir_owned.join("board.cb.md");
+                            let board = std::fs::read_to_string(&board_path).unwrap_or_default();
 
-                        let output = std::process::Command::new("claude")
-                            .args(["-p", &prompt])
-                            .output();
+                            let prompt = format!(
+                                "You are answering a question about a math derivation. \
+                                 Use LaTeX: $$...$$ for display equations, $...$ for inline math. \
+                                 Be concise and precise.\n\n\
+                                 Derivation:\n{}\n\n\
+                                 Question about step {}: {}",
+                                board, step_id, text
+                            );
 
-                        match output {
-                            Ok(out) if out.status.success() => {
-                                let reply = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                                if !reply.is_empty() {
-                                    // Get equation context from existing replies
-                                    let session_for_ctx = Session {
-                                        dir: session_dir_owned.clone(),
-                                        board_path: board_path.clone(),
-                                    };
-                                    let existing_msgs = session_for_ctx
-                                        .read_messages()
-                                        .map(|s| s.messages)
-                                        .unwrap_or_default();
-                                    let (known_eqs, eq_offset) =
-                                        crate::render::reply_equation_context(&existing_msgs, step_id);
-                                    let rendered = crate::render::render_reply_content_ctx(
-                                        &reply, step_id, &known_eqs, eq_offset,
-                                    );
-                                    let ts = std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_millis();
-                                    let msg = ChatMessage {
-                                        id: format!("{:x}", ts),
-                                        step_id,
-                                        role: ChatRole::Assistant,
-                                        text: reply,
-                                        rendered,
-                                        timestamp: chrono::Local::now().to_rfc3339(),
-                                        context: None,
-                                    };
-                                    let session = Session {
-                                        dir: session_dir_owned.clone(),
-                                        board_path: board_path.clone(),
-                                    };
-                                    if let Err(e) = session.append_message(msg) {
-                                        eprintln!("[chat] Failed to save claude reply: {}", e);
-                                    } else {
-                                        eprintln!("[chat] Claude reply saved for step {}", step_id);
+                            let output = std::process::Command::new("claude")
+                                .args(["-p", &prompt])
+                                .output();
+
+                            match output {
+                                Ok(out) if out.status.success() => {
+                                    let reply = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                                    if !reply.is_empty() {
+                                        // Get equation context from existing replies
+                                        let session_for_ctx = Session {
+                                            dir: session_dir_owned.clone(),
+                                            board_path: board_path.clone(),
+                                        };
+                                        let existing_msgs = session_for_ctx
+                                            .read_messages()
+                                            .map(|s| s.messages)
+                                            .unwrap_or_default();
+                                        let (known_eqs, eq_offset) =
+                                            crate::render::reply_equation_context(&existing_msgs, step_id);
+                                        let rendered = crate::render::render_reply_content_ctx(
+                                            &reply, step_id, &known_eqs, eq_offset,
+                                        );
+                                        let ts = std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_millis();
+                                        let msg = ChatMessage {
+                                            id: format!("{:x}", ts),
+                                            step_id,
+                                            role: ChatRole::Assistant,
+                                            text: reply,
+                                            rendered,
+                                            timestamp: chrono::Local::now().to_rfc3339(),
+                                            context: None,
+                                        };
+                                        let session = Session {
+                                            dir: session_dir_owned.clone(),
+                                            board_path: board_path.clone(),
+                                        };
+                                        if let Err(e) = session.append_message(msg) {
+                                            eprintln!("[chat] Failed to save claude reply: {}", e);
+                                        } else {
+                                            eprintln!("[chat] Claude reply saved for step {}", step_id);
+                                        }
                                     }
                                 }
+                                Ok(out) => {
+                                    eprintln!("[chat] claude CLI failed: {}", String::from_utf8_lossy(&out.stderr));
+                                }
+                                Err(e) => {
+                                    eprintln!("[chat] Failed to run claude: {}", e);
+                                }
                             }
-                            Ok(out) => {
-                                eprintln!("[chat] claude CLI failed: {}", String::from_utf8_lossy(&out.stderr));
-                            }
-                            Err(e) => {
-                                eprintln!("[chat] Failed to run claude: {}", e);
-                            }
-                        }
-                    }).ok();
+                        }).ok();
+                    }
                 }
+            } else {
+                eprintln!("[chat] External agent running (PID {}), skipping inline reply",
+                    std::fs::read_to_string(&agent_pid_path).unwrap_or_default().trim());
             }
 
             let resp_json = serde_json::json!({ "ok": true });

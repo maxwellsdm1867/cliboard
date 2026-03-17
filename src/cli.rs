@@ -104,6 +104,8 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Run as board agent: watch for chat questions and reply with full context
+    Agent,
     /// Import a session from a JSON file and open the board
     Import {
         /// Path to the JSON file

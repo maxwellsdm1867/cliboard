@@ -51,6 +51,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         Command::Chat { all, step, json } => cmd_chat(all, step, json),
         Command::Reply { step_id, text } => cmd_reply(step_id, text),
         Command::Listen { json } => cmd_listen(json),
+        Command::Agent => cmd_agent(),
         Command::Import { input } => cmd_import(&input),
         Command::Update { check } => cmd_update(check),
     }
@@ -488,6 +489,236 @@ fn cmd_listen(json: bool) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn cmd_agent() -> Result<(), Box<dyn std::error::Error>> {
+    use notify::{EventKind, RecursiveMode, Watcher};
+    use std::collections::HashSet;
+
+    let session = require_session()?;
+    let messages_path = session.messages_path();
+
+    // Register this agent via PID file so the server skips inline replies
+    session.write_agent_pid(std::process::id())?;
+
+    // Clean up agent.pid on exit
+    let session_dir_for_cleanup = session.dir.clone();
+    let cleanup = move || {
+        let _ = std::fs::remove_file(session_dir_for_cleanup.join("agent.pid"));
+    };
+    let cleanup_clone = {
+        let dir = session.dir.clone();
+        move || {
+            let _ = std::fs::remove_file(dir.join("agent.pid"));
+        }
+    };
+
+    // Handle Ctrl+C gracefully
+    ctrlc::set_handler(move || {
+        cleanup_clone();
+        eprintln!("\n[agent] Stopped.");
+        std::process::exit(0);
+    })?;
+
+    // Track which message IDs we've already seen
+    let mut seen: HashSet<String> = {
+        let store = session.read_messages()?;
+        store.messages.iter().map(|m| m.id.clone()).collect()
+    };
+
+    eprintln!("[agent] Board agent running (PID {})", std::process::id());
+    eprintln!("[agent] Watching for chat questions... (Ctrl+C to stop)");
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let mut watcher = notify::recommended_watcher(tx)?;
+
+    let watch_dir = messages_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    watcher.watch(watch_dir, RecursiveMode::NonRecursive)?;
+
+    for event_result in rx {
+        match event_result {
+            Ok(event) => {
+                let dominated = matches!(
+                    event.kind,
+                    EventKind::Modify(_) | EventKind::Create(_)
+                );
+                let affects = event.paths.iter().any(|p| {
+                    p == &messages_path
+                        || p.file_name().and_then(|n| n.to_str()) == Some("messages.json")
+                        || p.file_name().and_then(|n| n.to_str()) == Some("messages.json.tmp")
+                });
+
+                if dominated && affects {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+
+                    if let Ok(store) = session.read_messages() {
+                        for msg in &store.messages {
+                            if msg.role == ChatRole::User && !seen.contains(&msg.id) {
+                                seen.insert(msg.id.clone());
+
+                                let step_id = msg.step_id;
+                                let question = msg.text.clone();
+                                let context = msg.context.clone();
+
+                                eprintln!(
+                                    "[agent] New question on step {}: \"{}\"",
+                                    step_id,
+                                    if question.len() > 60 {
+                                        format!("{}...", &question[..57])
+                                    } else {
+                                        question.clone()
+                                    }
+                                );
+
+                                // Build prompt with FULL context
+                                let board = session.read_board().unwrap_or_default();
+                                let all_messages = session
+                                    .read_messages()
+                                    .map(|s| s.messages)
+                                    .unwrap_or_default();
+
+                                let step_history: Vec<_> = all_messages
+                                    .iter()
+                                    .filter(|m| m.step_id == step_id)
+                                    .collect();
+
+                                let prompt = build_agent_prompt(
+                                    &board,
+                                    &step_history,
+                                    step_id,
+                                    &question,
+                                    &context,
+                                );
+
+                                eprintln!("[agent] Generating reply for step {}...", step_id);
+                                let output = std::process::Command::new("claude")
+                                    .args(["-p", &prompt])
+                                    .output();
+
+                                match output {
+                                    Ok(out) if out.status.success() => {
+                                        let reply =
+                                            String::from_utf8_lossy(&out.stdout).trim().to_string();
+                                        if !reply.is_empty() {
+                                            let existing = session
+                                                .read_messages()
+                                                .map(|s| s.messages)
+                                                .unwrap_or_default();
+                                            let (known_eqs, eq_offset) =
+                                                render::reply_equation_context(&existing, step_id);
+                                            let rendered = render::render_reply_content_ctx(
+                                                &reply,
+                                                step_id,
+                                                &known_eqs,
+                                                eq_offset,
+                                            );
+                                            let ts = std::time::SystemTime::now()
+                                                .duration_since(std::time::UNIX_EPOCH)
+                                                .unwrap_or_default()
+                                                .as_millis();
+                                            let reply_msg = ChatMessage {
+                                                id: format!("{:x}", ts),
+                                                step_id,
+                                                role: ChatRole::Assistant,
+                                                text: reply,
+                                                rendered,
+                                                timestamp: chrono::Local::now().to_rfc3339(),
+                                                context: None,
+                                            };
+                                            match session.append_message(reply_msg) {
+                                                Ok(()) => {
+                                                    seen.insert(format!("{:x}", ts));
+                                                    eprintln!(
+                                                        "[agent] Reply posted for step {}",
+                                                        step_id
+                                                    );
+                                                }
+                                                Err(e) => {
+                                                    eprintln!(
+                                                        "[agent] Failed to save reply: {}",
+                                                        e
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Ok(out) => {
+                                        eprintln!(
+                                            "[agent] claude CLI error: {}",
+                                            String::from_utf8_lossy(&out.stderr)
+                                        );
+                                    }
+                                    Err(e) => {
+                                        eprintln!("[agent] Failed to run claude: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            Err(e) => eprintln!("[agent] Watch error: {}", e),
+        }
+    }
+
+    cleanup();
+    Ok(())
+}
+
+/// Build a prompt for the board agent with full conversation context.
+fn build_agent_prompt(
+    board: &str,
+    step_history: &[&ChatMessage],
+    step_id: usize,
+    question: &str,
+    context: &Option<crate::document::ChatContext>,
+) -> String {
+    let mut prompt = String::new();
+
+    prompt.push_str(
+        "You are a board agent answering questions about a math/physics derivation. \
+         You have the full derivation and conversation history for context.\n\
+         Use LaTeX: $$...$$ for display equations, $...$ for inline math.\n\
+         Be concise, precise, and pedagogical.\n\n",
+    );
+
+    prompt.push_str("## Derivation\n\n");
+    prompt.push_str(board);
+    prompt.push_str("\n\n");
+
+    // Include conversation history for this step (multi-turn context)
+    if step_history.len() > 1 {
+        prompt.push_str("## Previous conversation on this step\n\n");
+        for msg in &step_history[..step_history.len() - 1] {
+            let role = match msg.role {
+                ChatRole::User => "User",
+                ChatRole::Assistant => "Assistant",
+            };
+            prompt.push_str(&format!("{}: {}\n\n", role, msg.text));
+        }
+    }
+
+    if let Some(ctx) = context {
+        if let Some(selected) = &ctx.selected {
+            prompt.push_str(&format!("The user selected the text: \"{}\"\n", selected));
+        }
+        if let Some(latex) = &ctx.latex {
+            prompt.push_str(&format!("From the LaTeX: {}\n", latex));
+        }
+        if let Some(title) = &ctx.step_title {
+            prompt.push_str(&format!("In the step titled: \"{}\"\n", title));
+        }
+        prompt.push('\n');
+    }
+
+    prompt.push_str(&format!(
+        "## Current question (about step {})\n\n{}\n",
+        step_id, question
+    ));
+
+    prompt
+}
+
 const GITHUB_REPO: &str = "maxwellsdm1867/cliboard";
 
 fn cmd_update(check_only: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -721,5 +952,76 @@ mod tests {
     fn test_cmd_render_missing_file() {
         let result = cmd_render("/nonexistent/file.cb.md", None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_build_agent_prompt_basic() {
+        let board = "## Step 1\n\n$$E = mc^2$$\n";
+        let prompt = build_agent_prompt(board, &[], 1, "What is E?", &None);
+        assert!(prompt.contains("Derivation"));
+        assert!(prompt.contains("E = mc^2"));
+        assert!(prompt.contains("What is E?"));
+        assert!(prompt.contains("step 1"));
+        // No conversation history for empty step_history
+        assert!(!prompt.contains("Previous conversation"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_history() {
+        use crate::document::{ChatContext, ChatMessage, ChatRole};
+
+        let board = "## Step 1\n\n$$x = 1$$\n";
+        let msg1 = ChatMessage {
+            id: "1".into(),
+            step_id: 1,
+            role: ChatRole::User,
+            text: "What is x?".into(),
+            rendered: String::new(),
+            timestamp: String::new(),
+            context: None,
+        };
+        let msg2 = ChatMessage {
+            id: "2".into(),
+            step_id: 1,
+            role: ChatRole::Assistant,
+            text: "x is a variable".into(),
+            rendered: String::new(),
+            timestamp: String::new(),
+            context: None,
+        };
+        let msg3 = ChatMessage {
+            id: "3".into(),
+            step_id: 1,
+            role: ChatRole::User,
+            text: "But why 1?".into(),
+            rendered: String::new(),
+            timestamp: String::new(),
+            context: None,
+        };
+        let history = vec![&msg1, &msg2, &msg3];
+        let prompt = build_agent_prompt(board, &history, 1, "But why 1?", &None);
+
+        // Should include previous conversation (first 2 messages, not the current question)
+        assert!(prompt.contains("Previous conversation"));
+        assert!(prompt.contains("User: What is x?"));
+        assert!(prompt.contains("Assistant: x is a variable"));
+        assert!(prompt.contains("But why 1?"));
+    }
+
+    #[test]
+    fn test_build_agent_prompt_with_context() {
+        use crate::document::ChatContext;
+
+        let board = "## Step 1\n\n$$\\psi$$\n";
+        let ctx = Some(ChatContext {
+            selected: Some("ψ".into()),
+            latex: Some("\\psi".into()),
+            step_title: Some("Wave Function".into()),
+        });
+        let prompt = build_agent_prompt(board, &[], 1, "What is this?", &ctx);
+
+        assert!(prompt.contains("selected the text: \"ψ\""));
+        assert!(prompt.contains("From the LaTeX: \\psi"));
+        assert!(prompt.contains("step titled: \"Wave Function\""));
     }
 }
