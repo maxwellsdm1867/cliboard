@@ -37,6 +37,7 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
         Command::Chat { all, step, json } => cmd_chat(all, step, json),
         Command::Reply { step_id, text } => cmd_reply(step_id, text),
         Command::Listen { json } => cmd_listen(json),
+        Command::Import { input } => cmd_import(&input),
         Command::Update { check } => cmd_update(check),
     }
 }
@@ -166,6 +167,39 @@ fn cmd_stop() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         println!("No server PID found");
     }
+
+    Ok(())
+}
+
+fn cmd_import(input: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let (title, board_content, store) = export::import_json(input)?;
+
+    let session = Session::create(&title)?;
+
+    // Write the board content
+    std::fs::write(&session.board_path, &board_content)?;
+
+    // Write messages if any
+    if !store.messages.is_empty() {
+        let json = serde_json::to_string_pretty(&store)?;
+        std::fs::write(session.messages_path(), json)?;
+    }
+
+    let step_count = count_steps(&board_content);
+    let msg_count = store.messages.len();
+    println!(
+        "Imported \"{}\" ({} steps, {} messages)",
+        title, step_count, msg_count
+    );
+
+    let port = server::find_available_port(8377)?;
+    let url = format!("http://localhost:{}", port);
+
+    let _ = open::that(&url);
+
+    println!("Board live at {}", url);
+
+    server::start_server(&session, port)?;
 
     Ok(())
 }

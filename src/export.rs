@@ -1,8 +1,8 @@
 use crate::document::{Block, Document};
 use crate::render;
-use crate::session::ChatStore;
+use crate::session::{ChatContext, ChatMessage, ChatRole, ChatStore};
 use rust_embed::Embed;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 
 #[derive(Embed)]
@@ -145,37 +145,43 @@ pub fn export_json(
     Ok(())
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct SessionReport {
     title: String,
+    #[serde(default)]
     step_count: usize,
+    #[serde(default)]
     message_count: usize,
     steps: Vec<StepExport>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     unattached_messages: Vec<ChatEntry>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct StepExport {
     id: usize,
     title: String,
+    #[serde(default)]
     equations: Vec<String>,
+    #[serde(default)]
     notes: Vec<String>,
+    #[serde(default)]
     is_result: bool,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     chat: Vec<ChatEntry>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct ChatEntry {
     role: String,
     text: String,
+    #[serde(default)]
     timestamp: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     context: Option<ChatEntryContext>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 struct ChatEntryContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     selected: Option<String>,
@@ -183,6 +189,77 @@ struct ChatEntryContext {
     latex: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     step_title: Option<String>,
+}
+
+/// Import a session from a JSON report.
+///
+/// Reconstructs the .cb.md board file and messages.json from a previously
+/// exported (or hand-crafted) JSON report. Returns the title and generated
+/// board content + messages for the caller to create the session.
+pub fn import_json(
+    input_path: &str,
+) -> Result<(String, String, ChatStore), Box<dyn std::error::Error>> {
+    let json = fs::read_to_string(input_path)?;
+    let report: SessionReport = serde_json::from_str(&json)?;
+
+    // Reconstruct .cb.md content
+    let mut board = format!("---\ntitle: {}\n---\n", report.title);
+
+    for step in &report.steps {
+        let result_attr = if step.is_result { " {.result}" } else { "" };
+        board.push_str(&format!("\n## {}{}\n", step.title, result_attr));
+
+        for eq in &step.equations {
+            board.push_str(&format!("\n$${}$$\n", eq));
+        }
+
+        for note in &step.notes {
+            board.push_str(&format!("\n> {}\n", note));
+        }
+    }
+
+    // Reconstruct messages
+    let mut messages = Vec::new();
+    for step in &report.steps {
+        for entry in &step.chat {
+            let role = match entry.role.as_str() {
+                "assistant" => ChatRole::Assistant,
+                _ => ChatRole::User,
+            };
+
+            let rendered = if role == ChatRole::Assistant {
+                render::render_reply_content(&entry.text, step.id)
+            } else {
+                render::render_chat_text(&entry.text)
+            };
+
+            let timestamp_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis();
+
+            messages.push(ChatMessage {
+                id: format!("{:x}", timestamp_ms + messages.len() as u128),
+                step_id: step.id,
+                role,
+                text: entry.text.clone(),
+                rendered,
+                timestamp: if entry.timestamp.is_empty() {
+                    chrono::Local::now().to_rfc3339()
+                } else {
+                    entry.timestamp.clone()
+                },
+                context: entry.context.as_ref().map(|c| ChatContext {
+                    selected: c.selected.clone(),
+                    latex: c.latex.clone(),
+                    step_title: c.step_title.clone(),
+                }),
+            });
+        }
+    }
+
+    let store = ChatStore { messages };
+    Ok((report.title, board, store))
 }
 
 fn html_escape(s: &str) -> String {

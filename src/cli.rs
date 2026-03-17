@@ -96,6 +96,11 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Import a session from a JSON file and open the board
+    Import {
+        /// Path to the JSON file
+        input: String,
+    },
     /// Update cliboard to the latest version
     Update {
         /// Just check for updates, don't install
